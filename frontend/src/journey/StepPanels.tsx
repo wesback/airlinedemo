@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { ApiError, caseUrl, postJson, type CaseHistory, type CaseRecord, type ObligationRecord, type Readiness, type ReserveDraft, type Session, type TechnicalReviews } from './api';
+import { ApiError, caseUrl, postJson, postPackage, type CaseHistory, type CaseRecord, type ObligationRecord, type Readiness, type ReserveDraft, type Session, type TechnicalReviews } from './api';
 import { actorName, aircraftFor, formatWhen, PERSONAS, STEPS, type CaseProgress, type StepDefinition } from './model';
 import { ActorGlyph, CheckIcon, DocumentIcon } from './Art';
 import { aiBriefFor } from './aiBriefs';
@@ -72,11 +72,29 @@ export function documentTitle(documentId: string) {
   return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
-function IntakePanel({ data }: PanelProps) {
+const DEMO_PACKAGE_FILES = ['engine-identity-record.pdf', 'llp-status-sheet.pdf', 'maintenance-log-extract.pdf'];
+// Synthetic records packages served from frontend/public/demo-records; the server only sends registered synthetic text to the model.
+const DEMO_PACKAGES: Record<string, string[]> = { 'case-001': DEMO_PACKAGE_FILES, 'case-002': DEMO_PACKAGE_FILES };
+
+type UploadPhase = 'idle' | 'intake' | 'agent';
+
+function IntakePanel({ data, session, onChanged, onSwitchPersona }: PanelProps) {
   const basis = data.record.basis;
   const documents = documentsOf(data.history);
   if (basis.length === 0) {
-    return <Empty title="Waiting for the records package">The outgoing lessee has not uploaded the return records yet. Intake runs automatically as soon as they arrive.</Empty>;
+    if (session.role !== 'presenter') {
+      return (
+        <div className="av-handoff">
+          <span className="av-handoff-icon"><DocumentIcon /></span>
+          <div>
+            <strong>Waiting for the records package</strong>
+            <p>The outgoing lessee has not delivered the return records yet. In the demo, the presenter sends the package on their behalf.</p>
+          </div>
+          <button type="button" className="av-button av-button-secondary" onClick={() => onSwitchPersona('presenter')}>Continue as demo presenter</button>
+        </div>
+      );
+    }
+    return <PackageUpload caseId={data.record.caseId} csrfToken={session.csrfToken} onChanged={onChanged} />;
   }
   return (
     <>
@@ -98,6 +116,92 @@ function IntakePanel({ data }: PanelProps) {
   );
 }
 
+function PackageUpload({ caseId, csrfToken, onChanged }: { caseId: string; csrfToken: string; onChanged: PanelProps['onChanged'] }) {
+  const demoFiles = DEMO_PACKAGES[caseId];
+  const [phase, setPhase] = useState<UploadPhase>('idle');
+  const [error, setError] = useState('');
+  const busy = phase !== 'idle';
+
+  async function send(files: File[]) {
+    if (files.length === 0) return;
+    setError('');
+    setPhase('intake');
+    // The server parses, pins and then runs the agent in one request; the second stage is shown once parsing has had time to finish.
+    const timer = window.setTimeout(() => setPhase('agent'), 1500);
+    try {
+      const receipt = await postPackage(caseId, csrfToken, files);
+      const refused = receipt.documents.filter((doc) => doc.status !== 'accepted');
+      if (refused.length === receipt.documents.length) {
+        setError(`No document was accepted: ${refused.map((doc) => `${doc.fileName} (${doc.reason})`).join(', ')}.`);
+      }
+      await onChanged();
+    } catch (caught) {
+      setError(caught instanceof ApiError && caught.status === 429
+        ? 'Another package is being processed. Try again in a minute.'
+        : caught instanceof Error ? caught.message : 'The package could not be sent.');
+    } finally {
+      window.clearTimeout(timer);
+      setPhase('idle');
+    }
+  }
+
+  async function sendDemo() {
+    setError('');
+    try {
+      const files = await Promise.all(demoFiles.map(async (name) => {
+        const response = await fetch(`/demo-records/${caseId}/${name}`);
+        if (!response.ok) throw new Error(`The demo document ${name} could not be loaded.`);
+        return new File([await response.blob()], name, { type: 'application/pdf' });
+      }));
+      await send(files);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The demo package could not be loaded.');
+    }
+  }
+
+  return (
+    <div className="av-upload">
+      <div className="av-upload-head">
+        <span className="av-handoff-icon"><DocumentIcon /></span>
+        <div>
+          <strong>Send the return records package</strong>
+          <p>Stand in for the outgoing lessee. Intake parses and pins every PDF, then the records agent investigates them straight away.</p>
+        </div>
+      </div>
+      {demoFiles && (
+        <ul className="av-docs" aria-label="Demo records package">
+          {demoFiles.map((name) => (
+            <li key={name}><DocumentIcon /><span><strong>{documentTitle(name)}</strong><span>Synthetic PDF, 1 page</span></span></li>
+          ))}
+        </ul>
+      )}
+      <ol className="av-upload-stages" aria-live="polite">
+        <li className={phase === 'intake' ? 'is-active' : phase === 'agent' ? 'is-done' : ''}>
+          <ActorGlyph actor="rules" size={14} /> Intake parses and pins the documents
+        </li>
+        <li className={phase === 'agent' ? 'is-active' : ''}>
+          <ActorGlyph actor="ai" size={14} /> Records agent reads them and cites its findings
+        </li>
+        <li><ActorGlyph actor="human" size={14} /> A technical reviewer decides</li>
+      </ol>
+      <div className="av-upload-actions">
+        {demoFiles && (
+          <button type="button" className="av-button av-button-primary" disabled={busy} onClick={() => void sendDemo()}>
+            {phase === 'intake' ? 'Parsing documents…' : phase === 'agent' ? 'AI agent investigating…' : 'Send demo records package'}
+          </button>
+        )}
+        <label className={`av-button ${demoFiles ? 'av-button-secondary' : 'av-button-primary'}${busy ? ' is-disabled' : ''}`}>
+          {!demoFiles && busy ? (phase === 'intake' ? 'Parsing documents…' : 'AI agent investigating…') : 'Upload PDFs…'}
+          <input className="av-visually-hidden" type="file" accept="application/pdf,.pdf" multiple disabled={busy}
+            onChange={(event) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void send(files); }} />
+        </label>
+      </div>
+      <p className="av-footnote">Only registered synthetic demo records are sent to the model. Other PDFs are pinned as evidence and go straight to a technical reviewer.</p>
+      {error && <p className="av-notice av-notice-alert" role="alert">{error}</p>}
+    </div>
+  );
+}
+
 function InvestigationPanel({ data }: PanelProps) {
   const events = (data.history?.events ?? []).filter((event) => event.capabilityLabel === 'AI agent');
   if (events.length === 0) {
@@ -108,11 +212,17 @@ function InvestigationPanel({ data }: PanelProps) {
     );
   }
   const brief = aiBriefFor(data.record.caseId, data.history);
+  const escalated = events.some((event) => event.eventType === 'investigation-escalated');
+  const recorded = data.record.caseId.startsWith('cp-');
   return (
     <>
-      <Outcome tone="ai">The records agent finished and handed its findings to a technical reviewer.</Outcome>
+      {escalated
+        ? <Outcome tone="alert">The records agent produced no findings, so the package went straight to a technical reviewer.</Outcome>
+        : <Outcome tone="ai">The records agent finished and handed its findings to a technical reviewer.</Outcome>}
       {brief && <AiBriefView brief={brief} trace={events} />}
-      <p className="av-footnote">Recorded agent run. A live run needs an approved model manifest in this environment.</p>
+      <p className="av-footnote">{recorded
+        ? 'Recorded agent run on the seeded case pack.'
+        : 'Live run: the records agent called the model through the governed gateway when the package arrived.'}</p>
     </>
   );
 }

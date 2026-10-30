@@ -537,6 +537,136 @@ public sealed class EvidenceInvestigationTests : IDisposable
         public void Dispose() { }
     }
 
+    private static readonly string[] DemoRecordFiles = ["engine-identity-record.pdf", "llp-status-sheet.pdf", "maintenance-log-extract.pdf"];
+
+    // The demo records package the presenter sends from the intake step, served by the client from frontend/public.
+    private static byte[] DemoRecord(string package, string file, [CallerFilePath] string testFile = "") =>
+        File.ReadAllBytes(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(testFile)!, "..", "..", "frontend", "public", "demo-records", package, file)));
+
+    private static async Task<HttpResponseMessage> PostDemoPackageAsync(HttpClient client, (string Cookie, string Csrf) session, string package)
+    {
+        var form = new MultipartFormDataContent();
+        foreach (var file in DemoRecordFiles)
+        {
+            var part = new ByteArrayContent(DemoRecord(package, file));
+            part.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+            form.Add(part, "files", file);
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/cases/{Case}/packages") { Content = form };
+        request.Headers.Add("Cookie", session.Cookie);
+        request.Headers.Add("X-CSRF-Token", session.Csrf);
+        return await client.SendAsync(request);
+    }
+
+    // The model gate sends only registered synthetic text, so every demo PDF must extract to a committed fixture.
+    [Theory]
+    [InlineData("case-001", "engine-identity-record.pdf")]
+    [InlineData("case-001", "llp-status-sheet.pdf")]
+    [InlineData("case-001", "maintenance-log-extract.pdf")]
+    [InlineData("case-002", "engine-identity-record.pdf")]
+    [InlineData("case-002", "llp-status-sheet.pdf")]
+    [InlineData("case-002", "maintenance-log-extract.pdf")]
+    public void DemoRecordExtractsToRegisteredSyntheticContent(string package, string file)
+    {
+        var extracted = AirlineDemo.Api.Evidence.EvidenceIntake.ExtractText(DemoRecord(package, file));
+        Assert.Equal(AirlineDemo.Api.Evidence.EvidenceProcessingState.Complete, extracted.State);
+        Assert.True(SyntheticContentRegistry.FromCommittedFixtures().IsRegistered(extracted.Text.TrimEnd('\r', '\n')));
+    }
+
+    [Fact]
+    public async Task DemoPackageMovesTheCaseThroughIntakeAndInvestigationToTechnicalReview()
+    {
+        const string quote = "No installation record for ESN-DEMO1-212 is included in this records package.";
+        var claim = $$"""[{"text":"{{quote}}","witnesses":[{"documentId":"llp-status-sheet.pdf","page":1,"quote":"{{quote}}"}]}]""";
+        var model = new CountingChatClient(claim);
+        using var factory = CreateFactory(model);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+
+        using var response = await PostDemoPackageAsync(client, presenter, "case-001");
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+        Assert.Equal(1, model.Calls);
+
+        var store = new CaseStateStore(_statePath);
+        var state = store.Read(ScopeFor(store));
+        Assert.Single(state.Basis);
+        var events = state.JourneyEvents!;
+        Assert.Equal(["package-received", "evidence-reviewed", "finding-raised"], events.Select(e => e.EventType));
+        Assert.Equal(["intake", "records-agent", "records-agent"], events.Select(e => e.ActorRole));
+        Assert.Equal(["Rules-based", "AI agent", "AI agent"], events.Select(e => e.CapabilityLabel));
+        Assert.Equal(DemoRecordFiles, events[0].Witnesses.Select(w => w.DocumentId).Order(StringComparer.Ordinal));
+        Assert.Equal(quote, events[2].Summary);
+        Assert.Equal(("llp-status-sheet.pdf", 1, 1), (events[2].Witnesses.Single().DocumentId, events[2].Witnesses.Single().Page, events[2].Witnesses.Single().BasisVersion));
+        var item = Assert.Single(state.WorkItems!);
+        Assert.Equal(("review-case-001", "open", "technical-reviewer"), (item.ItemId, item.State, item.Owner));
+        Assert.Equal("approved", store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId)!.Outcome);
+
+        // A repeated submission replays the receipt: no second basis, event, work item or model call.
+        using var repeat = await PostDemoPackageAsync(client, presenter, "case-001");
+        Assert.Equal(HttpStatusCode.OK, repeat.StatusCode);
+        var after = new CaseStateStore(_statePath);
+        var replayed = after.Read(ScopeFor(after));
+        Assert.Equal(state.Revision, replayed.Revision);
+        Assert.Equal(1, model.Calls);
+    }
+
+    [Fact]
+    public async Task ModelServiceFailureEscalatesToTechnicalReviewInsteadOfFailingTheUpload()
+    {
+        using var factory = CreateFactory(new FailingModelClient());
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+
+        using var response = await PostDemoPackageAsync(client, presenter, "case-001");
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+
+        var store = new CaseStateStore(_statePath);
+        var state = store.Read(ScopeFor(store));
+        Assert.Equal(["package-received", "investigation-escalated"], state.JourneyEvents!.Select(e => e.EventType));
+        Assert.StartsWith("The AI agent could not reach the model service", state.JourneyEvents![1].Summary);
+        Assert.Equal("review-case-001", Assert.Single(state.WorkItems!).ItemId);
+        Assert.Equal("escalated", store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId)!.Outcome);
+    }
+
+    [Fact]
+    public async Task UnregisteredDocumentIsPinnedButNeverSentToTheModel()
+    {
+        var model = new CountingChatClient();
+        using var factory = CreateFactory(model);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+
+        using var response = await PostPackageAsync(client, presenter, "valid-text.pdf", ReadFixture("valid-text.pdf"));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        Assert.Equal(0, model.Calls);
+        var store = new CaseStateStore(_statePath);
+        var state = store.Read(ScopeFor(store));
+        Assert.Single(state.Basis);
+        Assert.Equal(["package-received", "investigation-escalated"], state.JourneyEvents!.Select(e => e.EventType));
+        Assert.StartsWith("The model gate kept these documents from the AI agent", state.JourneyEvents![1].Summary);
+        Assert.Single(state.WorkItems!);
+    }
+
+    /// <summary>Model stub that fails like an unreachable or refusing model endpoint. Makes no network request.</summary>
+    private sealed class FailingModelClient : IChatClient
+    {
+        public ChatClientMetadata Metadata { get; } = new("failing");
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new System.ClientModel.ClientResultException("HTTP 400 (invalid_request_error) model refused the request");
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() { }
+    }
+
     [Fact]
     public void EvidenceSourceReturnsOnlyTheCitedPageOfAMultiPageDocument()
     {

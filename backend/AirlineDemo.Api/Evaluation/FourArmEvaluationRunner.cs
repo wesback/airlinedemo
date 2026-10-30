@@ -543,8 +543,8 @@ public sealed class FourArmEvaluationRunner(IEnumerable<IEvaluationArmExecutor> 
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                     {
-                        _logger?.LogWarning("Evaluation dispatch failed for {Arm}: {ErrorType}",
-                            arm, ex.GetType().FullName ?? ex.GetType().Name);
+                        _logger?.LogWarning("Evaluation dispatch failed for {Arm}: {ErrorDetail}",
+                            arm, AirlineDemo.Api.Investigation.ModelFailureDetail.Describe(ex));
                         activity?.SetTag("evaluation.outcome", ex.GetType().Name);
                         dispatches.Add(new EvaluationDispatch(arm, null, 0, calls.Snapshot(),
                             new EvaluationArmFailure(arm.ToString(), input.CaseId, ex.GetType().FullName ?? ex.GetType().Name))

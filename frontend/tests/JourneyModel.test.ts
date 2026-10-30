@@ -109,4 +109,29 @@ describe('AI briefing', () => {
     expect(brief.documentsRead).toBe(2);
     expect(brief.findings).toEqual([]);
   });
+
+  it('turns live finding-raised events into cited findings', () => {
+    const witness = (documentId: string, page: number) => ({ witnessId: `w-${documentId}`, documentId, documentVersion: 1, page });
+    const brief = aiBriefFor('case-001', { events: [
+      { eventId: 'p-agent', sequence: 2, eventType: 'evidence-reviewed', actorRole: 'records-agent', summary: 'Read 3 documents.', capabilityLabel: 'AI agent',
+        witnesses: [witness('a.pdf', 1), witness('b.pdf', 1), witness('c.pdf', 1)] },
+      { eventId: 'p-finding-1', sequence: 3, eventType: 'finding-raised', actorRole: 'records-agent', summary: 'No installation record for ESN-DEMO1-212 is included.', capabilityLabel: 'AI agent',
+        witnesses: [witness('b.pdf', 1)] },
+    ] })!;
+    expect(brief.headline).toBe('The agent raised 1 finding from 3 documents, each quoted from its source page.');
+    expect(brief.findings).toEqual([{ id: 'p-finding-1', severity: 'attention', title: 'No installation record for ESN-DEMO1-212 is included.',
+      detail: 'Quoted word for word from the cited page. The citation check found the quote on that page before the finding was kept.',
+      sources: [{ document: 'b.pdf', note: 'page 1' }] }]);
+    expect(brief.checks.map((check) => check.result)).toEqual(['pass']);
+  });
+
+  it('explains an escalated live run instead of claiming findings', () => {
+    const brief = aiBriefFor('case-002', { events: [
+      { eventId: 'p-agent', sequence: 2, eventType: 'investigation-escalated', actorRole: 'records-agent', summary: 'The AI agent could not reach the model service.', capabilityLabel: 'AI agent',
+        witnesses: [{ witnessId: 'w1', documentId: 'a.pdf', documentVersion: 1, page: 1 }] },
+    ] })!;
+    expect(brief.headline).toBe('The AI agent could not reach the model service.');
+    expect(brief.findings).toEqual([]);
+    expect(brief.whyHuman).toBe('The agent produced no usable findings, so a technical reviewer checks the records package directly before the case can move on.');
+  });
 });

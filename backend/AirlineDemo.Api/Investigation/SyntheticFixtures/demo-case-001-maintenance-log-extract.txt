@@ -1,0 +1,1 @@
+SYNTHETIC EVIDENCE: Maintenance log extract for aircraft N-DEMO1, 01 Aug 2026 to 28 Oct 2026. Task card TC-72-0041 engine borescope inspection of ESN-DEMO1-114 completed and signed 14 Sep 2026. Task card TC-32-0107 main landing gear inspection completed and signed 20 Sep 2026. Deferred defect DD-2026-031 cabin pressure controller fault remains open at return.

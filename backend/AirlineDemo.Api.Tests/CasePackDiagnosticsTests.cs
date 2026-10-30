@@ -162,11 +162,14 @@ public sealed class CasePackDiagnosticsTests
     public async Task AC022_RuntimeOperationsEmitIsolatedDiagnostics()
     {
         var logger = new CaptureLogger();
+        var caseStatePath = Path.Combine(Path.GetTempPath(), $"ac022-case-state-{Guid.NewGuid():N}.json");
+        using var cleanup = new DeleteFileOnDispose(caseStatePath);
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Demo:Passcode"] = "runtime-diagnostics-passcode",
                 ["Persistence:EvidenceProvider"] = "Memory",
+                ["CaseState:Path"] = caseStatePath,
             })).ConfigureServices(services =>
             {
                 services.AddSingleton<ILoggerProvider>(new CaptureLoggerProvider(logger));
@@ -510,6 +513,14 @@ public sealed class CasePackDiagnosticsTests
                 .Where(item => item.CaseId == caseId && item.RunId == runId && item.BasisId == basisId)
                 .OrderBy(item => item.Sequence).ToArray();
             return events.Length == 0 ? null : new ArrCaseHistorySelection(caseId, runId, basisId, events, false);
+        }
+    }
+
+    private sealed class DeleteFileOnDispose(string path) : IDisposable
+    {
+        public void Dispose()
+        {
+            if (File.Exists(path)) File.Delete(path);
         }
     }
 
