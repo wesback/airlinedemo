@@ -6,6 +6,7 @@ import SignInScreen from './journey/SignInScreen';
 import TopBar, { type Mode } from './journey/TopBar';
 import PoolBoard from './journey/PoolBoard';
 import CaseJourney from './journey/CaseJourney';
+import CopilotPanel from './journey/CopilotPanel';
 import { useFleet } from './journey/useFleet';
 import { useThemeControl } from './theme/themeControl';
 import type { HangarEntryAppProps } from './hangar/HangarMode';
@@ -112,6 +113,11 @@ function SignedInShell({ session, route, navigate, notice, onSwitchPersona, onSi
         <CaseJourney session={session} caseId={route.caseId} onBack={() => navigate({ view: 'board' })}
           onOpenCase={(caseId) => navigate({ view: 'case', caseId })}
           onSwitchPersona={onSwitchPersona} onChanged={() => void fleet.reload()} />
+      )}
+      {route.view !== 'hangar' && (
+        <div className="av-copilot-dock">
+          <CopilotPanel session={session} caseId={route.view === 'case' ? route.caseId : null} />
+        </div>
       )}
       {route.view === 'hangar' && (
         <Suspense fallback={<main className="av-page" id="main"><p className="av-loading" role="status">Opening the hangar…</p></main>}>
