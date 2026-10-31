@@ -594,6 +594,11 @@ button:disabled { cursor: not-allowed; }
 .av-copilot-record.is-selected { border-color: var(--av-ai); }
 .av-copilot-record-meta { font-size: 12px; font-weight: 600; color: var(--av-text-2); }
 .av-copilot-record pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; max-height: 240px; overflow: auto; }
+.av-copilot-confirmation { margin-top: 12px; border: 1px solid var(--av-line-strong); border-radius: var(--av-radius); padding: 14px; display: grid; gap: 10px; }
+.av-copilot-tuple { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 13.5px; }
+.av-copilot-tuple dt { font-weight: 700; color: var(--av-text-2); }
+.av-copilot-tuple dd { margin: 0; }
+.av-copilot-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 /* ---------- Dark adjustments ---------- */
 :root[data-theme='dark'] .av-logo:not(.av-logo-inverse) { color: var(--av-text); }

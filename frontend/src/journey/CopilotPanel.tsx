@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import type { Session } from './api';
+import CopilotConfirmationCard from './CopilotConfirmation';
 import { copilotMessage, postCopilot, type CopilotAnswer, type CopilotQuestionBody, type CopilotRecord } from './copilotApi';
 
 export const COPILOT_NOTICE = 'Synthetic demo only. Do not enter personal, confidential, live aircraft or customer data. Your question is sent to the governed model.';
@@ -87,6 +88,8 @@ export default function CopilotPanel({ session, caseId }: Props) {
             </li>;
           })}
         </ul>}
+        {answer.confirmation && answer.confirmation.caseId === caseId && <CopilotConfirmationCard key={answer.confirmation.proposalId}
+          session={session} confirmation={answer.confirmation} releaseNote={current.sentNote} />}
       </section>}
       {answer && answer.records.length > 0 && <section className="av-copilot-records" aria-labelledby={`${ids}-records`}>
         <h3 id={`${ids}-records`}>Source records (untrusted data)</h3>
