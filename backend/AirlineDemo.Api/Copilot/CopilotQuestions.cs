@@ -27,6 +27,7 @@ public static class CopilotQuestions
     public const int MaxInputTokens = 16000;
     public const int MaxOutputTokens = 2000;
     public const int MaxAnswerLength = 8000;
+    public const int MaxCitations = 100;
     public static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan[] Backoff = [TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(1000)];
     private static readonly Regex CallId = new("^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
@@ -107,7 +108,10 @@ public static class CopilotQuestions
         private readonly string _run = "turn-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
         private readonly List<ChatMessage> _history = [];
         private readonly HashSet<string> _callIds = new(StringComparer.Ordinal);
+        private static readonly JsonSerializerOptions EscapedJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default };
         private readonly JsonArray _records = [];
+        // The source/record/version tuples read_source returned to this user in this turn: the only citable values.
+        private readonly HashSet<CopilotSourceRef> _returned = [];
         private int _modelAttempts;
         private int _toolAttempts;
 
@@ -201,6 +205,7 @@ public static class CopilotQuestions
                 return (call.Name, retained, tool.Structured, tool.Structured["uiOnly"]!.DeepClone());
             var observation = CopilotInputContract.Observe(call.Name, args?.Operation, tool.Structured)
                 ?? throw new TurnFailure(502, "copilot_context_invalid");
+            _returned.UnionWith(CopilotInputContract.ReturnedRefs(observation));
             if (tool.Structured["untrustedRecords"] is JsonObject envelope)
             {
                 if (envelope["records"] is JsonArray list) foreach (var record in list) _records.Add(record?.DeepClone());
@@ -244,30 +249,53 @@ public static class CopilotQuestions
             ["contractVersion"] = CopilotProjections.ContractVersion, ["httpStatus"] = status, ["error"] = new JsonObject { ["code"] = code },
         };
 
-        // The final answer is exactly {"answer": "<plain text>"}; anything else is an invalid model response.
+        // The final answer is {"answer": "<plain text>", "citations"?: [tuple]}; any other shape is an invalid model response.
         private CopilotInvocationResult Answer(string text)
         {
-            try
-            {
-                using var document = JsonDocument.Parse(text);
-                var root = document.RootElement;
-                if (root.ValueKind == JsonValueKind.Object && root.EnumerateObject().Count() == 1 && root.TryGetProperty("answer", out var answer)
-                    && answer.ValueKind == JsonValueKind.String && answer.GetString() is { Length: > 0 and <= MaxAnswerLength } value
-                    && !string.IsNullOrWhiteSpace(value))
-                    return Result(value, "ok", null);
-            }
-            catch (Exception exception) when (exception is JsonException or InvalidOperationException) { }
-            throw new TurnFailure(502, "model_response_invalid");
+            JsonObject? root;
+            try { root = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions { AllowDuplicateProperties = false }) as JsonObject; }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException) { root = null; }
+            if (root is null || root.Any(property => property.Key is not ("answer" or "citations"))
+                || root["answer"] is not JsonValue answer || answer.GetValueKind() != JsonValueKind.String
+                || answer.GetValue<string>() is not { Length: > 0 and <= MaxAnswerLength } value || string.IsNullOrWhiteSpace(value))
+                throw new TurnFailure(502, "model_response_invalid");
+            return Result(value, "ok", null, root.ContainsKey("citations") ? Citations(root["citations"]) : []);
         }
 
-        private CopilotInvocationResult Result(string answer, string code, JsonNode? confirmation)
+        // A citation is exactly one tuple read_source returned in this turn; a URL, point reference, other record,
+        // version or case is refused and no link is produced.
+        private List<CopilotSourceRef> Citations(JsonNode? node)
+        {
+            var cited = new List<CopilotSourceRef>();
+            if (node is not JsonArray array || array.Count > MaxCitations) throw new TurnFailure(502, "citation_invalid");
+            foreach (var item in array)
+            {
+                if (item is not JsonObject citation || citation.Count != 3 || citation["sourceId"] is not JsonValue source
+                    || source.GetValueKind() != JsonValueKind.String || citation["recordId"] is not JsonValue record
+                    || record.GetValueKind() != JsonValueKind.String || citation["recordVersion"] is not JsonValue version
+                    || version.GetValueKind() != JsonValueKind.Number || !version.TryGetValue<int>(out var number))
+                    throw new TurnFailure(502, "citation_invalid");
+                var reference = new CopilotSourceRef(source.GetValue<string>(), record.GetValue<string>(), number);
+                if (!_returned.Contains(reference)) throw new TurnFailure(502, "citation_invalid");
+                if (!cited.Contains(reference)) cited.Add(reference);
+            }
+            return cited;
+        }
+
+        private CopilotInvocationResult Result(string answer, string code, JsonNode? confirmation, List<CopilotSourceRef>? citations = null)
         {
             var body = new JsonObject
             {
-                ["contractVersion"] = CopilotProjections.ContractVersion, ["answer"] = answer, ["citations"] = new JsonArray(), ["records"] = _records,
+                ["contractVersion"] = CopilotProjections.ContractVersion, ["answer"] = answer,
+                ["citations"] = new JsonArray([.. (citations ?? []).Select(item => (JsonNode)new JsonObject
+                {
+                    ["sourceId"] = item.SourceId, ["recordId"] = item.RecordId, ["recordVersion"] = item.RecordVersion,
+                })]),
+                ["records"] = _records,
             };
             if (confirmation is not null) body["confirmation"] = confirmation;
-            return new(Results.Json(body), 200, code, CopilotOutcome.Succeeded);
+            // The minimal-API default encoder is relaxed; untrusted record text is written with HTML-sensitive characters escaped.
+            return new(Results.Text(body.ToJsonString(EscapedJson), "application/json; charset=utf-8"), 200, code, CopilotOutcome.Succeeded);
         }
     }
 }

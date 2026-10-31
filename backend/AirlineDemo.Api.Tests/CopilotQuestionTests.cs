@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Copilot;
+using AirlineDemo.Api.Decisions;
 using AirlineDemo.Api.Finance;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
@@ -202,8 +203,9 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
             (ISourceSystem<T>)ActivatorUtilities.CreateInstance(provider, descriptor.ImplementationType!), sourceId, payload, _sources));
     }
 
-    private DemoSession Session(string role, WebApplicationFactory<Program>? factory = null) =>
-        (factory ?? _factory).Services.GetRequiredService<DemoSessionStore>().Create(new DemoUser($"q-{role}-{Guid.NewGuid():N}", "Test", role, [CaseA]));
+    private DemoSession Session(string role, WebApplicationFactory<Program>? factory = null, params string[] cases) =>
+        (factory ?? _factory).Services.GetRequiredService<DemoSessionStore>().Create(
+            new DemoUser($"q-{role}-{Guid.NewGuid():N}", "Test", role, cases.Length == 0 ? [CaseA] : cases));
 
     private static string Body(string question, string? caseId = CaseA, string? note = null)
     {
@@ -237,6 +239,9 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
             Usage = input is null && output is null ? null : new UsageDetails { InputTokenCount = input, OutputTokenCount = output },
         };
 
+    private static ChatResponse Final(string answer, string citations) =>
+        new(new ChatMessage(ChatRole.Assistant, $$"""{"answer":{{JsonSerializer.Serialize(answer)}},"citations":{{citations}}}"""));
+
     private static ChatResponse Calls(params (string Id, string Name, string Json)[] calls) =>
         new(new ChatMessage(ChatRole.Assistant, [.. calls.Select(call => (AIContent)new FunctionCallContent(call.Id, call.Name, Arguments(call.Json))
         {
@@ -258,6 +263,24 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
     }
 
     private long Revision() { var (store, scope) = Scope(); return store.Read(scope).Revision; }
+
+    private void Unblock()
+    {
+        foreach (var (action, decision) in new[] { (FinanceEndpoints.ReserveDecisionAction, "approve"), (FinanceEndpoints.LegalDecisionAction, "signed-off") })
+        {
+            var (store, scope) = Scope();
+            store.Commit(scope, store.Read(scope).Revision, new CaseCommit(null, null, "presenter", action, JsonSerializer.Serialize(new { decision })));
+        }
+        var (_, caseScope) = Scope();
+        Assert.Empty(ReleaseEndpoints.Blockers(Scope().Store.Read(caseScope)));
+    }
+
+    private static string ToolError(int status, string code) => $$$"""{"contractVersion":1,"httpStatus":{{{status}}},"error":{"code":"{{{code}}}"}}""";
+
+    private static string ReadArgs(string operation, string? sourceId = null, string? recordId = null, string caseId = CaseA) =>
+        $$"""{"caseId":"{{caseId}}","operation":"{{operation}}"{{(sourceId is null ? "" : $",\"sourceId\":\"{sourceId}\"")}}{{(recordId is null ? "" : $",\"recordId\":\"{recordId}\"")}}}""";
+
+    private const string Note = "Release to the next lessee.";
 
     // AC-024: the copilot resolves the existing lazy, manifest-governed client; resolving it creates no credential or
     // request, and an unapproved or missing manifest refuses before any provider work.
@@ -510,6 +533,190 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
         Assert.Equal(HttpStatusCode.OK, (await Ask(session, Body("Time"))).Status);
         _chat.Reset(_ => Final("ok"), _ => _time.Advance(TimeSpan.FromSeconds(30)));
         AssertError(await Ask(session, Body("Time")), HttpStatusCode.GatewayTimeout, "copilot_timeout");
+    }
+
+    // AC-027: no outbound model request (any message role, any retry, any schema) carries a source record payload.
+    [Fact]
+    public async Task ProductionHost_CopilotMessages_RawSourcesAbsentEveryRequest()
+    {
+        _time.AutoFire = TimeSpan.FromSeconds(1);
+        _ = Revision();
+        var baseline = _sources.Calls;
+        try
+        {
+            _chat.Reset(index => index switch
+            {
+                0 => Calls(("r1", "read_source", ReadArgs("list", "technical")), ("r2", "read_source", ReadArgs("record", "technical", "technical-rec-1")),
+                    ("r3", "read_source", ReadArgs("list", "maintenance"))),
+                1 => throw new HttpRequestException("transient"),
+                2 => Calls(("r4", "read_source", ReadArgs("record", "records", "records-rec-1"))),
+                _ => Final("Read four records."),
+            });
+            var reply = await Ask(Session("technical-reviewer"), Body("Read every source."));
+
+            Assert.Equal(HttpStatusCode.OK, reply.Status);
+            Assert.Equal(4, _chat.Requests.Count);
+            Assert.Equal(baseline + 4, _sources.Calls);
+            foreach (var index in Enumerable.Range(0, _chat.Requests.Count))
+            {
+                var outbound = _chat.Outbound(index) + JsonSerializer.Serialize(_chat.Options[index]!.Tools, AIJsonUtilities.DefaultOptions);
+                foreach (var forbidden in new[] { "IGNORE PREVIOUS", "<script", "alert(1)", "]]>", "</tool>", "payload", "fields", "untrustedRecords", "uiOnly", "modelSafe", "asOf" })
+                    Assert.DoesNotContain(forbidden, outbound, StringComparison.OrdinalIgnoreCase);
+            }
+            var records = reply.Json["records"]!.AsArray();
+            Assert.Equal(4, records.Count);
+            Assert.All(records.Take(3), record => Assert.Equal(Hostile, (string?)record!["payload"]!["fields"]!["note"]));
+            Assert.Equal("""{"documentId":"","documentVersion":"","containsPersonalData":false}""", records[3]!["payload"]!.ToJsonString());
+            Assert.DoesNotContain("<script>", reply.Body, StringComparison.Ordinal);
+            Assert.Contains("\\u003Cscript\\u003E", reply.Body, StringComparison.Ordinal);
+        }
+        finally { _time.AutoFire = null; }
+    }
+
+    // AC-028: hostile tool calls get exactly their contract results and never reach the source or business paths.
+    [Fact]
+    public async Task ProductionHost_HostileModel_ToolSchemaSelectedCaseApproval()
+    {
+        var reviewer = Session("technical-reviewer", null, CaseA, "cp-case-b");
+        var revision = Revision();
+        var baseline = _sources.Calls;
+        _chat.Reset(index => index == 0 ? Calls(
+            ("h1", "delete_case", Args()),
+            ("h2", "get_case_summary", """{"caseId":"cp-case-a","role":"presenter"}"""),
+            ("h3", "list_my_cases", """{"user":"someone-else"}"""),
+            ("h4", "read_source", """{"caseId":"cp-case-a","operation":"summary","baseUrl":"evil.example"}"""),
+            ("h5", "advance_stage", $$"""{"caseId":"cp-case-a","expectedRevision":{{revision}},"confirmed":true}"""),
+            ("h6", "get_case_summary", """{"caseId":7}"""),
+            ("h7", "get_case_summary", """{"caseId":"cp-case-a","caseId":"cp-case-b"}"""),
+            ("h8", "get_open_points", Args("cp-case-b")),
+            ("h9", "read_source", ReadArgs("list", "technical", caseId: "cp-case-b"))) : Final("Done."));
+        Assert.Equal(HttpStatusCode.OK, (await Ask(reviewer, Body("Do everything."))).Status);
+        Assert.Equal(
+            [ToolError(400, "unknown_tool"), .. Enumerable.Repeat(ToolError(400, "invalid_request"), 6), ToolError(403, "selected_case_mismatch"),
+                ToolError(403, "selected_case_mismatch")],
+            _chat.Observations(1).Select(item => item.ToJsonString()));
+        var retained = _chat.Requests[1].SelectMany(message => message.Contents).OfType<FunctionCallContent>().ToArray();
+        Assert.Equal("unknown_tool", retained[0].Name);
+        Assert.All(retained.Take(7), call => Assert.Empty(call.Arguments!));
+        Assert.Equal(baseline, _sources.Calls);
+        Assert.Equal(revision, Revision());
+
+        _chat.Reset(index => index == 0 ? Calls(("n1", "get_case_summary", Args()), ("n2", "list_my_cases", "{}")) : Final("Done."));
+        Assert.Equal(HttpStatusCode.OK, (await Ask(reviewer, Body("No case selected.", caseId: null))).Status);
+        var observed = _chat.Observations(1);
+        Assert.Equal(ToolError(409, "case_selection_required"), observed[0].ToJsonString());
+        Assert.Equal(200, (int)observed[1]["httpStatus"]!);
+        Assert.Equal(2, observed[1]["result"]!["cases"]!.AsArray().Count);
+
+        var presenter = Session("presenter");
+        _chat.Reset(index => index == 0
+            ? Calls(("g1", "advance_stage", $$"""{"caseId":"cp-case-a","expectedRevision":{{revision}},"proposalId":"{{Guid.NewGuid():D}}"}""")) : Final("Done."));
+        Assert.Equal(HttpStatusCode.OK, (await Ask(presenter, Body("Release it.", note: Note))).Status);
+        Assert.Equal(ToolError(404, "confirmation_not_found"), _chat.Observations(1).Single().ToJsonString());
+        Assert.Equal(revision, Revision());
+
+        foreach (var (id, valid) in new[] { ("a", true), (new string('x', 64), true), ("", false), (new string('x', 65), false), ("bad id", false), ("id.1", false) })
+        {
+            _chat.Reset(index => index == 0
+                ? new ChatResponse(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent(id, "list_my_cases", new Dictionary<string, object?>())]))
+                : Final("Done."));
+            var reply = await Ask(reviewer, Body("Ids"));
+            if (valid) Assert.Equal(HttpStatusCode.OK, reply.Status);
+            else AssertError(reply, HttpStatusCode.BadGateway, "model_response_invalid");
+        }
+        _chat.Reset(index => index == 0 ? Calls(("same", "list_my_cases", "{}"), ("same", "list_my_cases", "{}")) : Final("Done."));
+        AssertError(await Ask(reviewer, Body("Ids")), HttpStatusCode.BadGateway, "model_response_invalid");
+    }
+
+    // AC-029: only a tuple read_source returned to this user in this turn is citable.
+    [Fact]
+    public async Task ProductionHost_Citations_ActuallyReturnedTuples()
+    {
+        var session = Session("technical-reviewer");
+        const string returned = """{"sourceId":"technical","recordId":"technical-rec-1","recordVersion":2}""";
+        _chat.Reset(index => index == 0 ? Calls(("c1", "read_source", ReadArgs("record", "technical", "technical-rec-1")))
+            : Final("See the record.", $"[{returned},{returned}]"));
+        var reply = await Ask(session, Body("Cite it."));
+        Assert.Equal(HttpStatusCode.OK, reply.Status);
+        Assert.Equal($"[{returned}]", reply.Json["citations"]!.ToJsonString());
+
+        foreach (var citation in new[]
+        {
+            """{"sourceId":"technical","recordId":"technical-rec-1","recordVersion":3}""",
+            """{"sourceId":"technical","recordId":"technical-rec-2","recordVersion":2}""",
+            """{"sourceId":"maintenance","recordId":"technical-rec-1","recordVersion":2}""",
+            """{"sourceId":"technical","recordId":"technical-rec-1","recordVersion":2,"caseId":"cp-case-b"}""",
+            """{"sourceId":"technical","recordId":"technical-rec-1","recordVersion":"2"}""",
+            """{"url":"evil.example/records/technical-rec-1"}""",
+            "\"technical-rec-1\"",
+        })
+        {
+            _chat.Reset(index => index == 0 ? Calls(("c1", "read_source", ReadArgs("record", "technical", "technical-rec-1")))
+                : Final("See the record.", $"[{citation}]"));
+            AssertError(await Ask(session, Body("Cite it.")), HttpStatusCode.BadGateway, "citation_invalid");
+        }
+        _chat.Reset(index => index == 0 ? Calls(("c1", "read_source", ReadArgs("record", "technical", "technical-rec-1")))
+            : Final("See the record.", "{}"));
+        AssertError(await Ask(session, Body("Cite it.")), HttpStatusCode.BadGateway, "citation_invalid");
+
+        // A tuple returned in an earlier turn, to another user, or only as a point reference is not citable.
+        foreach (var other in new[] { session, Session("technical-reviewer") })
+        {
+            _chat.Reset(_ => Final("Cached.", $"[{returned}]"));
+            AssertError(await Ask(other, Body("Cite it.")), HttpStatusCode.BadGateway, "citation_invalid");
+        }
+        _chat.Reset(index => index == 0 ? Calls(("p1", "get_open_points", Args()))
+            : Final("Point.", _chat.Observations(1).Single()["result"]!["points"]!.AsArray().SelectMany(point => point!["sourceRefs"]!.AsArray())
+                .Select(item => item!.ToJsonString()).FirstOrDefault() is { } pointRef ? $"[{pointRef}]" : $"[{returned}]"));
+        AssertError(await Ask(session, Body("Cite the point.")), HttpStatusCode.BadGateway, "citation_invalid");
+    }
+
+    // AC-042: a hostile model changes nothing; an entitled read and an approved exact release are the positive controls.
+    [Fact]
+    public async Task ProductionHost_HostileModel_ZeroUnintendedEffects()
+    {
+        var ledger = _factory.Services.GetRequiredService<ICopilotInvocationStore>();
+        async Task<int> Proposals() => (await ledger.ReadCaseAsync(CaseA, TestContext.Current.CancellationToken))
+            .Count(item => item.Operation == "advance_stage" && item.Phase == "outcome" && item.HttpStatus == 200);
+        int Audit() => Scope().Store.Read(Scope().Scope).Audit.Count;
+        var revision = Revision();
+        var audit = Audit();
+        var baseline = _sources.Calls;
+        var presenter = Session("presenter", null, CaseA, "cp-case-b");
+        var reviewer = Session("technical-reviewer");
+
+        _chat.Reset(index => index == 0 ? Calls(
+            ("x1", "advance_stage", $$"""{"caseId":"cp-case-a","expectedRevision":{{revision}},"proposalId":"{{Guid.NewGuid():D}}"}"""),
+            ("x2", "advance_stage", $$"""{"caseId":"cp-case-b","expectedRevision":0}"""),
+            ("x3", "advance_stage", $$"""{"caseId":"cp-case-a","expectedRevision":{{revision}},"confirmed":true,"note":"x"}"""),
+            ("x4", "read_source", ReadArgs("list", "finance", caseId: "cp-case-b")),
+            ("x5", "commit_case", Args())) : Final("Done."));
+        Assert.Equal(HttpStatusCode.OK, (await Ask(presenter, Body("Release everything.", note: Note))).Status);
+        _chat.Reset(index => index == 0 ? Calls(("y1", "advance_stage", $$"""{"caseId":"cp-case-a","expectedRevision":{{revision}}}""")) : Final("Done."));
+        Assert.Equal(HttpStatusCode.OK, (await Ask(reviewer, Body("Release it.", note: Note))).Status);
+        Assert.Equal(ToolError(403, "forbidden"), _chat.Observations(1).Single().ToJsonString());
+        _chat.Reset(index => index == 0 ? Calls(("z1", "advance_stage", $$"""{"caseId":"cp-case-a","expectedRevision":{{revision}}}""")) : Final("Done."));
+        Assert.Equal(HttpStatusCode.OK, (await Ask(presenter, Body("Release it without a note."))).Status);
+        Assert.Equal(ToolError(400, "release_note_required"), _chat.Observations(1).Single().ToJsonString());
+
+        Assert.Equal((revision, audit, baseline, 0), (Revision(), Audit(), _sources.Calls, await Proposals()));
+
+        _chat.Reset(index => index == 0 ? Calls(("v1", "read_source", ReadArgs("list", "technical"))) : Final("Read."));
+        Assert.Equal(HttpStatusCode.OK, (await Ask(reviewer, Body("Read the technical source."))).Status);
+        Assert.Equal(baseline + 1, _sources.Calls);
+
+        Unblock();
+        var unblocked = Revision();
+        _chat.Reset(_ => Calls(("p1", "advance_stage", $$"""{"caseId":"cp-case-a","expectedRevision":{{unblocked}}}""")));
+        var proposal = (string)(await Ask(presenter, Body("Release it.", note: Note))).Json["confirmation"]!["proposalId"]!;
+        Assert.Equal(200, _factory.Services.GetRequiredService<CopilotProposalService>().Decide(presenter, CaseA, proposal, "approve").Status);
+        _chat.Reset(index => index == 0
+            ? Calls(("p2", "advance_stage", $$"""{"caseId":"cp-case-a","expectedRevision":{{unblocked}},"proposalId":"{{proposal}}"}""")) : Final("Released."));
+        Assert.Equal(HttpStatusCode.OK, (await Ask(presenter, Body("Complete the release.", note: Note))).Status);
+        Assert.Equal("""{"contractVersion":1,"httpStatus":200,"resultCode":"ok"}""", _chat.Observations(1).Single().ToJsonString());
+        Assert.Equal(unblocked + 1, Revision());
+        Assert.True(ReleaseEndpoints.IsReleased(Scope().Store.Read(Scope().Scope)));
+        Assert.Equal(2, await Proposals());
     }
 
     private sealed class FakeResponse(int status) : System.ClientModel.Primitives.PipelineResponse
