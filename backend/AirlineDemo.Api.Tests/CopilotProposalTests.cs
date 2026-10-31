@@ -693,4 +693,71 @@ public sealed class CopilotProposalTests : IAsyncDisposable
         Assert.Equal(original.Body, Entry(proposalId).Receipt!.Bytes);
         Assert.Equal(original, await Advance(presenter, proposalId, revision));
     }
+
+    // ---- Slice 6: trusted UI-assisted advance route over the advance_stage tool ----
+
+    private Task<Reply> PostAdvance(DemoSession? session, string body, bool csrf = true, string origin = Origin)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/cases/{CaseA}/copilot/advance")
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add("Origin", origin);
+        return Send(request, session, csrf);
+    }
+
+    private static string ToolError(int status, string code) => $$$"""{"contractVersion":1,"httpStatus":{{{status}}},"error":{"code":"{{{code}}}"}}""";
+
+    [Fact]
+    public async Task ProductionHost_AdvanceRoute_ProposeApproveRetryReleasesOnce()
+    {
+        Unblock();
+        var presenter = Session("presenter", CpCases);
+        var before = State();
+        var revision = before.Revision;
+
+        foreach (var (reply, status, body) in new (Task<Reply>, HttpStatusCode, string)[]
+        {
+            (PostAdvance(presenter, $$"""{"expectedRevision":{{revision}},"releaseNote":"n","confirmed":true}"""), HttpStatusCode.BadRequest, ToolError(400, "invalid_request")),
+            (PostAdvance(presenter, $$"""{"expectedRevision":{{revision}}}"""), HttpStatusCode.BadRequest, ToolError(400, "invalid_request")),
+            (PostAdvance(presenter, $$"""{"expectedRevision":{{revision}},"releaseNote":7}"""), HttpStatusCode.BadRequest, ToolError(400, "invalid_request")),
+            (PostAdvance(presenter, $$"""{"expectedRevision":"{{revision}}","releaseNote":"n"}"""), HttpStatusCode.BadRequest, ToolError(400, "invalid_request")),
+            (PostAdvance(presenter, $$"""{"expectedRevision":{{revision}}.0,"releaseNote":"n"}"""), HttpStatusCode.BadRequest, ToolError(400, "invalid_request")),
+            (PostAdvance(presenter, $$"""{"expectedRevision":{{revision}},"releaseNote":" "}"""), HttpStatusCode.BadRequest, ToolError(400, "invalid_release_note")),
+            (PostAdvance(presenter, $$"""{"expectedRevision":{{revision}},"releaseNote":"{{new string('n', 2001)}}"}"""), HttpStatusCode.BadRequest, ToolError(400, "invalid_release_note")),
+            (PostAdvance(Session("executive", CpCases), $$"""{"expectedRevision":{{revision}},"releaseNote":"n"}"""), HttpStatusCode.Forbidden, ToolError(403, "forbidden")),
+            (PostAdvance(presenter, $$"""{"expectedRevision":{{revision}},"releaseNote":"n"}""", csrf: false), HttpStatusCode.Forbidden, Error("anti_forgery_failed")),
+            (PostAdvance(presenter, $$"""{"expectedRevision":{{revision}},"releaseNote":"n"}""", origin: "http://evil.test"), HttpStatusCode.Forbidden, Error("origin_forbidden")),
+        })
+        {
+            Assert.Equal((status, body), Status(await reply));
+        }
+
+        // Without a proposal id the route creates a pending proposal and returns its confirmation tuple for the trusted UI.
+        var proposed = await PostAdvance(presenter, $$"""{"expectedRevision":{{revision}},"releaseNote":"  {{Note}}  "}""");
+        Assert.Equal(HttpStatusCode.OK, proposed.Status);
+        var uiOnly = proposed.Json["uiOnly"]!.AsObject();
+        var proposalId = (string)uiOnly["proposalId"]!;
+        Assert.True(JsonNode.DeepEquals(new JsonObject
+        {
+            ["contractVersion"] = 1, ["httpStatus"] = 200, ["resultCode"] = "confirmation_required", ["uiOnly"] = (await Get(presenter, proposalId)).Json,
+        }, proposed.Json), proposed.Body);
+        Assert.Equal((Note, "pending"), ((string)uiOnly["note"]!, (string)uiOnly["state"]!));
+
+        var retry = $$"""{"expectedRevision":{{revision}},"releaseNote":"{{Note}}","proposalId":"{{proposalId}}"}""";
+        Assert.Equal((HttpStatusCode.Conflict, ToolError(409, "confirmation_required")), Status(await PostAdvance(presenter, retry)));
+        Assert.Equal(HttpStatusCode.OK, (await Decision(presenter, proposalId, "approve")).Status);
+
+        var receipt = Receipt(proposalId, revision + 1, before.Audit.Count + 1);
+        Assert.Equal((HttpStatusCode.OK, receipt), Status(await PostAdvance(presenter, retry)));
+        Assert.Equal((HttpStatusCode.OK, receipt), Status(await PostAdvance(presenter, retry)));
+        Assert.Equal((revision + 1, 1), (Revision(CaseA), Releases(CaseA)));
+
+        var outcomes = await ReleaseOutcomes();
+        Assert.All(outcomes, item => Assert.Equal("trusted-ui", item.Provenance));
+        // Schema rejections happen before the case is authorized, so they are not case-scoped ledger rows. The fake clock is
+        // frozen, so rows share a timestamp and are compared without order.
+        Assert.Equal(["confirmation_required", "confirmation_required", "forbidden", "invalid_release_note", "invalid_release_note", "ok", "ok"],
+            outcomes.Select(item => item.ResultCode).Order(StringComparer.Ordinal));
+    }
 }

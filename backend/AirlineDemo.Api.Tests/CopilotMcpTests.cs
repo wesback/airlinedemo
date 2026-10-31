@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Copilot;
+using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.SourceSystems;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -198,8 +199,7 @@ public sealed class CopilotMcpTests : IAsyncDisposable
         var listed = await Rpc(session, "tools/list");
         Assert.Equal(HttpStatusCode.OK, listed.Status);
         var tools = listed.Json["result"]!["tools"]!.AsArray();
-        // This slice exposes the four read tools; the release slice adds advance_stage for the five-tool set.
-        Assert.Equal(["list_my_cases", "get_case_summary", "get_open_points", "read_source"], tools.Select(tool => (string)tool!["name"]!));
+        Assert.Equal(["list_my_cases", "get_case_summary", "get_open_points", "read_source", "advance_stage"], tools.Select(tool => (string)tool!["name"]!));
         const string id = """{"type":"string","minLength":1,"maxLength":128,"pattern":"^[!-~]+$"}""";
         Assert.Equal(
         [
@@ -207,6 +207,7 @@ public sealed class CopilotMcpTests : IAsyncDisposable
             $$"""{"type":"object","properties":{"caseId":{{id}}},"required":["caseId"],"additionalProperties":false}""",
             $$"""{"type":"object","properties":{"caseId":{{id}}},"required":["caseId"],"additionalProperties":false}""",
             $$"""{"type":"object","properties":{"caseId":{{id}},"sourceId":{"type":"string","enum":["technical","maintenance","finance","records","contracts"]},"operation":{"type":"string","enum":["summary","list","record"]},"recordId":{{id}}},"required":["caseId","operation"],"additionalProperties":false}""",
+            $$"""{"type":"object","properties":{"caseId":{{id}},"expectedRevision":{"type":"integer","minimum":0,"maximum":9223372036854775806},"proposalId":{{id}}},"required":["caseId","expectedRevision"],"additionalProperties":false}""",
         ], tools.Select(tool => tool!["inputSchema"]!.ToJsonString()), (expected, actual) => JsonNode.DeepEquals(JsonNode.Parse(expected), JsonNode.Parse(actual)));
 
         var unsupported = await Rpc(session, "initialize", """{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}""");
@@ -220,6 +221,43 @@ public sealed class CopilotMcpTests : IAsyncDisposable
 
         var unknown = await Rpc(session, "bogus/method");
         Assert.Equal(-32601, (int)unknown.Json["error"]!["code"]!);
+    }
+
+    [Fact]
+    public async Task ProductionHost_McpAdvanceStage_NoteOnlyFromTrustedContext()
+    {
+        var presenter = Session("presenter", CpCases);
+
+        // A raw MCP call never carries a trusted note, so no proposal or release is possible; a model-supplied note or
+        // confirmation argument and a non-integer revision are refused by the strict schema.
+        foreach (var arguments in new[]
+        {
+            """{"caseId":"cp-case-a","expectedRevision":0}""",
+            """{"caseId":"cp-case-a","expectedRevision":9223372036854775806}""",
+            """{"caseId":"cp-case-a","expectedRevision":0,"proposalId":"6f9619ff-8b86-d011-b42d-00cf4fc964ff"}""",
+        })
+        {
+            AssertToolError(await Call(presenter, "advance_stage", arguments), 400, "release_note_required");
+        }
+        foreach (var arguments in new[]
+        {
+            """{"caseId":"cp-case-a","expectedRevision":0,"confirmed":true}""",
+            """{"caseId":"cp-case-a","expectedRevision":0,"note":"Release it."}""",
+            """{"caseId":"cp-case-a","expectedRevision":0,"releaseNote":"Release it."}""",
+            """{"caseId":"cp-case-a"}""",
+            """{"caseId":"cp-case-a","expectedRevision":"0"}""",
+            """{"caseId":"cp-case-a","expectedRevision":1.0}""",
+            """{"caseId":"cp-case-a","expectedRevision":1e0}""",
+            """{"caseId":"cp-case-a","expectedRevision":-1}""",
+            """{"caseId":"cp-case-a","expectedRevision":9223372036854775807}""",
+        })
+        {
+            AssertToolError(await Call(presenter, "advance_stage", arguments), 400, "invalid_request");
+        }
+        AssertToolError(await Call(Session("executive", CpCases), "advance_stage", """{"caseId":"cp-case-a","expectedRevision":0}"""), 403, "forbidden");
+        var store = _factory.Services.GetRequiredService<ICaseStateStore>();
+        var state = store.Read(store.AuthorizeCase("cp-case-a", store.OwnerOf("cp-case-a")!));
+        Assert.DoesNotContain(state.Audit, item => item.Action == "aircraft.released");
     }
 
     [Fact]
@@ -422,7 +460,7 @@ public sealed class CopilotMcpTests : IAsyncDisposable
         })
             AssertToolError(await Call(session, "read_source", arguments), 400, "invalid_request");
         AssertToolError(await Call(session, "list_my_cases", """{"role":"presenter"}"""), 400, "invalid_request");
-        AssertToolError(await Call(session, "advance_stage", """{"caseId":"cp-case-a"}"""), 400, "unknown_tool");
+        AssertToolError(await Call(session, "release_case", """{"caseId":"cp-case-a"}"""), 400, "unknown_tool");
         Assert.Equal(calls, _calls.Count);
 
         (_factory, _client) = Build(new FailingStore());

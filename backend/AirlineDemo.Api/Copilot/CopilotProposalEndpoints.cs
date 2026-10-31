@@ -180,7 +180,31 @@ public static class CopilotProposalEndpoints
             (string caseId, string proposalId, HttpContext http, DemoSessionStore sessions, CopilotProposalService service) =>
                 service.Read(DemoAuthEndpoints.CurrentSession(http, sessions), caseId, proposalId).ToHttp());
         app.MapPost("/api/v1/cases/{caseId}/copilot/proposals/{proposalId}/decision", Decide);
+        app.MapPost("/api/v1/cases/{caseId}/copilot/advance", Advance);
         return app;
+    }
+
+    // Trusted UI-assisted advance: dispatches the same advance_stage tool in process, with the raw note in the private
+    // request context and trusted-ui provenance. A body other than exactly the three fields is refused by the tool.
+    private static async Task<IResult> Advance(string caseId, HttpContext http, DemoSessionStore sessions)
+    {
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (CopilotRequestGuard.Check(http, session) is { } denied) return CopilotRequestGuard.Error(denied.Status, denied.Code);
+        var body = await ReadObject(http);
+        var valid = body is not null && body.Keys.All(key => key is "expectedRevision" or "releaseNote" or "proposalId")
+            && body.ContainsKey("expectedRevision") && body.TryGetValue("releaseNote", out var note) && note.ValueKind == JsonValueKind.String;
+        var arguments = new Dictionary<string, JsonElement>(StringComparer.Ordinal) { ["caseId"] = JsonSerializer.SerializeToElement(caseId) };
+        if (valid)
+        {
+            arguments["expectedRevision"] = body!["expectedRevision"];
+            if (body.TryGetValue("proposalId", out var proposalId)) arguments["proposalId"] = proposalId;
+            http.Items[CopilotMcp.ReleaseNoteKey] = body["releaseNote"].GetString();
+        }
+        http.Items[CopilotMcp.ProvenanceKey] = CopilotProvenance.TrustedUi;
+        var tool = await CopilotMcp.InvokeToolAsync(http, "advance_stage", arguments, reject: !valid, http.RequestAborted);
+        return tool.Raw is not null
+            ? Results.Text(tool.Raw, "application/json", Encoding.UTF8, tool.HttpStatus)
+            : Results.Json(tool.Structured, statusCode: tool.HttpStatus);
     }
 
     private static async Task<IResult> Decide(string caseId, string proposalId, HttpContext http, DemoSessionStore sessions,
