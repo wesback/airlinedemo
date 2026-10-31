@@ -79,7 +79,7 @@ public sealed class SourceSummaryService(
         };
     }
 
-    private static bool CanSeeDetails(string role, string sourceId) => role switch
+    internal static bool CanSeeDetails(string role, string sourceId) => role switch
     {
         "technical-reviewer" => sourceId is "technical" or "maintenance" or "records",
         "finance-reviewer" => sourceId is "technical" or "finance",
@@ -87,7 +87,7 @@ public sealed class SourceSummaryService(
         _ => false,
     };
 
-    private static IReadOnlyList<SourceRecordInUse> ReadPins(CaseState state)
+    internal static IReadOnlyList<SourceRecordInUse> ReadPins(CaseState state)
     {
         if (state.Basis.Count == 0) return [];
         try

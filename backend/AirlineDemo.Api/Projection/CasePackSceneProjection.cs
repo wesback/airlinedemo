@@ -421,7 +421,7 @@ public static class CasePackSceneProjection
         var pages = text.Split(Evidence.EvidenceIntake.PageSeparator);
         return page <= pages.Length;
     }
-    private static bool TrySerial(AircraftCasePackSnapshot pack, string caseId, string kind, string? componentId, out string serial)
+    internal static bool TrySerial(AircraftCasePackSnapshot pack, string caseId, string kind, string? componentId, out string serial)
     {
         serial = ""; var record = pack.Manifest.Cases.SingleOrDefault(item => item.CaseId == caseId);
         var match = record?.SerialNumbers?.SingleOrDefault(item => item.Kind == kind && (kind != "component" || item.ComponentId == componentId));

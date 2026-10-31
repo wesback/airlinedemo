@@ -363,7 +363,7 @@ public static class CasePackEndpoints
             return Error(StatusCodes.Status500InternalServerError, "internal_error", "The request could not be completed.");
         }
     }
-    private static CasePackCaseSummary Project(
+    internal static CasePackCaseSummary Project(
         string caseId, string name, string category, CaseState? state, string role, DateTimeOffset now)
     {
         if (state is null)
@@ -432,7 +432,7 @@ public static class CasePackEndpoints
     private static bool CanReadSummaries(string role) =>
         role is "technical-reviewer" or "finance-reviewer" or "legal-reviewer" or "presenter" or "executive";
 
-    private static (string Name, string Category)? Metadata(string caseId) => caseId switch
+    internal static (string Name, string Category)? Metadata(string caseId) => caseId switch
     {
         "cp-case-a" => ("Case A", "narrow-body"),
         "cp-case-b" => ("Case B", "regional"),

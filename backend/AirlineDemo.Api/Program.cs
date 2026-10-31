@@ -1,6 +1,7 @@
 using AirlineDemo.Api;
 using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Copilot;
 using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Dashboard;
 using AirlineDemo.Api.Decisions;
@@ -54,6 +55,7 @@ builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<MockResponseService>();
 builder.Services.AddSingleton<SourceModeStore>();
 builder.Services.AddSingleton<SourceSummaryService>();
+builder.Services.AddSingleton<CopilotProjections>();
 builder.Services.AddSingleton<IDecisionDossierService, DecisionDossierService>();
 builder.Services.AddSingleton<EvidenceBasisStore>();
 builder.Services.AddSingleton<EvidencePackageStore>();
@@ -165,6 +167,7 @@ app.MapDemoRunReset();
 app.MapSourceModeEndpoints();
 app.MapSourceReadEndpoints();
 app.MapSourceSummaryEndpoints();
+app.MapCopilotProjectionEndpoints();
 app.MapStaticClient();
 
 TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);
