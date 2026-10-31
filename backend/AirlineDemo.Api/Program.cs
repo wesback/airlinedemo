@@ -40,6 +40,7 @@ builder.Services.AddCaseStateStore(builder.Configuration);
 builder.Services.AddCasePackRequestLimiter(builder.Configuration);
 builder.Services.AddSourceReadBudget(builder.Configuration);
 builder.Services.AddCopilotInvocationLedger(builder.Configuration);
+builder.Services.AddCopilotMcp();
 builder.Services.AddSingleton<InvestigationExecutionService>();
 builder.Services.AddSingleton<AssessmentStore>();
 builder.Services.AddSingleton<AssessmentApiRecordStore>();
@@ -169,6 +170,7 @@ app.MapSourceModeEndpoints();
 app.MapSourceReadEndpoints();
 app.MapSourceSummaryEndpoints();
 app.MapCopilotProjectionEndpoints();
+app.MapCopilotMcp();
 app.MapStaticClient();
 
 TransportSecurity.ValidateDeploymentConfiguration(app.Configuration, app.Environment);

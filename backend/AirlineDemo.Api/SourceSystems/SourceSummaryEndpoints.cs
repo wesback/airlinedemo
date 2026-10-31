@@ -16,7 +16,7 @@ public static class SourceSummaryEndpoints
         return app;
     }
 
-    private static async Task<IResult> Get(
+    internal static async Task<IResult> Get(
         int version,
         string caseId,
         HttpContext http,
