@@ -160,6 +160,8 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<SourceReadWindowRow> SourceReadWindows => Set<SourceReadWindowRow>();
     public DbSet<CasePackRequestWindowRow> CasePackRequestWindows => Set<CasePackRequestWindowRow>();
     public DbSet<CopilotInvocationRow> CopilotInvocations => Set<CopilotInvocationRow>();
+    public DbSet<CopilotProposalRow> CopilotProposals => Set<CopilotProposalRow>();
+    public DbSet<CopilotProposalStateRow> CopilotProposalStates => Set<CopilotProposalStateRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -181,6 +183,24 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.Endpoint).HasMaxLength(32).IsRequired();
             e.HasIndex(x => new { x.UserHash, x.Endpoint, x.RequestedAtTicks })
                 .HasDatabaseName("IX_case_pack_request_windows_user_endpoint_window");
+        });
+
+        modelBuilder.Entity<CopilotProposalRow>(e =>
+        {
+            e.ToTable("copilot_proposals", "dbo");
+            e.HasKey(x => x.ProposalId);
+            e.Property(x => x.CallerRef).HasMaxLength(64).IsRequired();
+            e.Property(x => x.SessionRef).HasMaxLength(64).IsRequired();
+            e.Property(x => x.CaseId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.Action).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Note).HasMaxLength(2000).IsRequired();
+        });
+
+        modelBuilder.Entity<CopilotProposalStateRow>(e =>
+        {
+            e.ToTable("copilot_proposal_states", "dbo");
+            e.HasKey(x => x.ProposalId);
+            e.Property(x => x.State).HasMaxLength(16).IsRequired();
         });
 
         modelBuilder.Entity<CopilotInvocationRow>(e =>

@@ -455,6 +455,9 @@ public sealed class CaseStateStore : ICaseStateStore
     private readonly object _gate = new();
     private Dictionary<string, CaseState> _cases;
 
+    /// <summary>The commit lock; in-memory copilot proposals share it so lifecycle and release are serialized together.</summary>
+    internal object SyncRoot => _gate;
+
     public CaseStateStore(string path, Action? beforePersist = null)
     {
         _path = path;

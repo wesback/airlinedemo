@@ -34,6 +34,10 @@ public interface ICopilotInvocationLedger
         CancellationToken cancellationToken = default);
     Task Outcome(CopilotAdmission admission, int httpStatus, string resultCode, CopilotOutcome outcome,
         CancellationToken cancellationToken = default);
+    /// <summary>The keyed, nonreversible reference for a user id, as recorded in the ledger.</summary>
+    string CallerRef(string userId);
+    /// <summary>The keyed, nonreversible reference for an exact demo session id, as recorded in the ledger.</summary>
+    string SessionRef(string sessionId);
 }
 
 public sealed class CopilotInvocationLedger(ICopilotInvocationStore store, TimeProvider time, IConfiguration configuration,
@@ -103,6 +107,10 @@ public sealed class CopilotInvocationLedger(ICopilotInvocationStore store, TimeP
         CopilotProvenance.TrustedUi => "trusted-ui",
         _ => throw new ArgumentOutOfRangeException(nameof(provenance)),
     };
+
+    public string CallerRef(string userId) => Ref("caller", userId);
+
+    public string SessionRef(string sessionId) => Ref("session", sessionId);
 
     private string Ref(string purpose, string value) =>
         Convert.ToHexStringLower(HMACSHA256.HashData(_key, Encoding.UTF8.GetBytes(purpose + "\0" + value)));

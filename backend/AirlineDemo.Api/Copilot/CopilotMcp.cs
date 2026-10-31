@@ -5,7 +5,6 @@ using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.SourceSystems;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
-using Microsoft.Net.Http.Headers;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -55,9 +54,8 @@ public static class CopilotMcp
 
     public static WebApplication MapCopilotMcp(this WebApplication app)
     {
-        var origins = (app.Configuration[AllowedOriginsSetting] is { Length: > 0 } configured ? configured : "http://localhost")
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal);
-        var hosts = origins.Select(origin => new Uri(origin).Authority).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var origins = CopilotRequestGuard.Origins(app.Configuration);
+        var hosts = CopilotRequestGuard.Hosts(origins);
         app.UseWhen(http => http.Request.Path.StartsWithSegments(Path), branch => branch.Use((http, next) => Gate(http, next, origins, hosts)));
         app.MapMcp(Path);
         return app;
@@ -66,14 +64,7 @@ public static class CopilotMcp
     private static async Task Gate(HttpContext http, RequestDelegate next, HashSet<string> origins, HashSet<string> hosts)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, http.RequestServices.GetRequiredService<DemoSessionStore>());
-        var origin = http.Request.Headers.Origin;
-        var denial = session is null ? (401, "unauthenticated")
-            : origin.Count != 1 || !origins.Contains(origin[0]!) ? (403, "origin_forbidden")
-            : !hosts.Contains(http.Request.Host.Value ?? "") ? (403, "host_forbidden")
-            : HttpMethods.IsPost(http.Request.Method) && !DemoAuthEndpoints.HasValidAntiForgery(http, session) ? (403, "anti_forgery_failed")
-            : HttpMethods.IsPost(http.Request.Method) && !(MediaTypeHeaderValue.TryParse(http.Request.ContentType, out var media)
-                && media.MediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase)) ? (415, "unsupported_media_type")
-            : default((int, string)?);
+        var denial = CopilotRequestGuard.Check(http, session, origins, hosts);
         if (denial is null && HttpMethods.IsPost(http.Request.Method)) denial = await InspectBody(http);
         if (denial is { } error) await Error(error.Item1, error.Item2).ExecuteAsync(http);
         else await next(http);
@@ -239,8 +230,7 @@ public static class CopilotMcp
         }, true),
         status, code, status is 401 or 403 || code == "case_not_found" ? CopilotOutcome.Denied : CopilotOutcome.Failed);
 
-    private static IResult Error(int status, string code) =>
-        Results.Json(new { contractVersion = CopilotProjections.ContractVersion, error = new { code } }, statusCode: status);
+    private static IResult Error(int status, string code) => CopilotRequestGuard.Error(status, code);
 
     private static JsonSerializerOptions Options(HttpContext http) =>
         http.RequestServices.GetRequiredService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>().Value.SerializerOptions;
