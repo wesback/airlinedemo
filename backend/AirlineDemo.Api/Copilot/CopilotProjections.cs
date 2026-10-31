@@ -112,7 +112,7 @@ public sealed class CopilotProjections(
     }
 
     // Role and scope are decided from session metadata and case ownership only, so a denial never reads case state.
-    private (CopilotProjectionResult? Denied, string? Role, CaseScope? Scope) Authorize(DemoSession? session, string caseId)
+    internal (CopilotProjectionResult? Denied, string? Role, CaseScope? Scope) Authorize(DemoSession? session, string caseId)
     {
         if (session is null) return (new(CopilotProjectionOutcome.Unauthenticated), null, null);
         var role = session.User.Role;

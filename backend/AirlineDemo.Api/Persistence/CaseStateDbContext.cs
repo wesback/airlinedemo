@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using AirlineDemo.Api.SourceSystems;
 using AirlineDemo.Api.Admission;
+using AirlineDemo.Api.Copilot;
 
 namespace AirlineDemo.Api.Persistence;
 
@@ -158,6 +159,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<CasePackResetReceiptRow> CasePackResetReceipts => Set<CasePackResetReceiptRow>();
     public DbSet<SourceReadWindowRow> SourceReadWindows => Set<SourceReadWindowRow>();
     public DbSet<CasePackRequestWindowRow> CasePackRequestWindows => Set<CasePackRequestWindowRow>();
+    public DbSet<CopilotInvocationRow> CopilotInvocations => Set<CopilotInvocationRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -179,6 +181,22 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.Endpoint).HasMaxLength(32).IsRequired();
             e.HasIndex(x => new { x.UserHash, x.Endpoint, x.RequestedAtTicks })
                 .HasDatabaseName("IX_case_pack_request_windows_user_endpoint_window");
+        });
+
+        modelBuilder.Entity<CopilotInvocationRow>(e =>
+        {
+            e.ToTable("copilot_invocations", "dbo");
+            e.HasKey(x => new { x.InvocationId, x.Phase });
+            e.Property(x => x.Phase).HasMaxLength(16);
+            e.Property(x => x.Operation).HasMaxLength(32).IsRequired();
+            e.Property(x => x.Provenance).HasMaxLength(32).IsRequired();
+            e.Property(x => x.CallerRef).HasMaxLength(64);
+            e.Property(x => x.SessionRef).HasMaxLength(64);
+            e.Property(x => x.Role).HasMaxLength(32).IsRequired();
+            e.Property(x => x.AuthorizedCaseRef).HasMaxLength(128);
+            e.Property(x => x.Outcome).HasMaxLength(16).IsRequired();
+            e.Property(x => x.ResultCode).HasMaxLength(64);
+            e.HasIndex(x => new { x.AuthorizedCaseRef, x.AtTicks }).HasDatabaseName("IX_copilot_invocations_case_at");
         });
 
         modelBuilder.Entity<InvestigationTraceRow>(e =>
