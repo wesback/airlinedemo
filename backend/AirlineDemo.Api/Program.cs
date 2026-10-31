@@ -172,6 +172,7 @@ app.MapSourceReadEndpoints();
 app.MapSourceSummaryEndpoints();
 app.MapCopilotProjectionEndpoints();
 app.MapCopilotProposalEndpoints();
+app.MapCopilotQuestionEndpoints();
 app.MapCopilotMcp();
 app.MapStaticClient();
 

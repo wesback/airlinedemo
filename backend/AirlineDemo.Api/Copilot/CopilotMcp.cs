@@ -27,7 +27,7 @@ public static class CopilotMcp
     private static readonly object DuplicateArgumentsKey = new();
     private static readonly string[] SourceIds = ["technical", "maintenance", "finance", "records", "contracts"];
     private const string Id = """{"type":"string","minLength":1,"maxLength":128,"pattern":"^[!-~]+$"}""";
-    private static readonly Tool[] Tools =
+    internal static readonly Tool[] Tools =
     [
         Define("list_my_cases", "Lists the caller's scoped cases as safe summaries.", "{}", "[]"),
         Define("get_case_summary", "Reads one scoped case's safe summary.", $$"""{"caseId":{{Id}}}""", """["caseId"]"""),
@@ -40,7 +40,7 @@ public static class CopilotMcp
             """["caseId","expectedRevision"]"""),
     ];
 
-    private sealed record ToolArgs(string? CaseId, string? SourceId, string? Operation, string? RecordId, long? ExpectedRevision = null,
+    internal sealed record ToolArgs(string? CaseId, string? SourceId, string? Operation, string? RecordId, long? ExpectedRevision = null,
         string? ProposalId = null);
 
     /// <summary>A tool's structured result; <c>Raw</c> holds exact stored receipt bytes when the result is a release receipt.</summary>
@@ -138,7 +138,7 @@ public static class CopilotMcp
         return result as ToolResult ?? (ToolResult)Fail(StatusCodes.Status503ServiceUnavailable, "audit_unavailable").Result;
     }
 
-    private static (bool Known, ToolArgs? Args) Parse(string name, IDictionary<string, JsonElement>? arguments, bool duplicates)
+    internal static (bool Known, ToolArgs? Args) Parse(string name, IDictionary<string, JsonElement>? arguments, bool duplicates)
     {
         string[]? allowed = name switch
         {
