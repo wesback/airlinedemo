@@ -162,6 +162,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<CopilotInvocationRow> CopilotInvocations => Set<CopilotInvocationRow>();
     public DbSet<CopilotProposalRow> CopilotProposals => Set<CopilotProposalRow>();
     public DbSet<CopilotProposalStateRow> CopilotProposalStates => Set<CopilotProposalStateRow>();
+    public DbSet<CopilotReleaseReceiptRow> CopilotReleaseReceipts => Set<CopilotReleaseReceiptRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -201,6 +202,14 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.ToTable("copilot_proposal_states", "dbo");
             e.HasKey(x => x.ProposalId);
             e.Property(x => x.State).HasMaxLength(16).IsRequired();
+        });
+
+        modelBuilder.Entity<CopilotReleaseReceiptRow>(e =>
+        {
+            e.ToTable("copilot_release_receipts", "dbo");
+            e.HasKey(x => x.ProposalId);
+            e.Property(x => x.Fingerprint).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Receipt).HasMaxLength(512).IsRequired();
         });
 
         modelBuilder.Entity<CopilotInvocationRow>(e =>

@@ -315,6 +315,39 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         return new CommitResult(Load(db, row.CaseId), Replayed: false);
     }
 
+    public Copilot.CopilotApiResult CommitCopilotRelease(CaseScope scope, Copilot.CopilotReleaseCommit commit)
+    {
+        using var db = NewContext();
+        using var tx = db.Database.BeginTransaction(IsolationLevel.Serializable);
+        var row = FindCase(db, scope.CaseId) ?? throw new CaseAccessDeniedException();
+        var current = Load(db, row.CaseId);
+        var entry = Copilot.SqlCopilotProposalStore.Read(db, commit.ProposalId);
+        if (Copilot.CopilotReleasePolicy.Evaluate(commit, entry, current) is { } rejected)
+        {
+            tx.Commit();
+            return rejected;
+        }
+
+        row.Revision = current.Revision + 1;
+        var receipt = Copilot.CopilotReleasePolicy.Receipt(entry!.Proposal, row.Revision, current.Audit.Count + 1);
+        db.CopilotProposalStates.Single(state => state.ProposalId == commit.ProposalId).State = Copilot.CopilotProposalStates.Consumed;
+        db.CopilotReleaseReceipts.Add(new Copilot.CopilotReleaseReceiptRow { ProposalId = commit.ProposalId, Fingerprint = commit.Fingerprint, Receipt = receipt });
+        db.CaseEvents.Add(new CaseEventRow
+        {
+            CaseId = row.CaseId, Revision = row.Revision, Actor = commit.Actor, Action = Decisions.ReleaseEndpoints.ReleaseAction,
+            Detail = Copilot.CopilotReleasePolicy.AuditDetail(entry.Proposal.Note), At = commit.Time.GetUtcNow(),
+        });
+        db.SaveChanges();
+        db.CopilotInvocations.Add(Copilot.SqlCopilotInvocationStore.ToRow(commit.Outcome));
+        try { db.SaveChanges(); }
+        catch (Exception exception) when (exception is DbUpdateException or InvalidOperationException)
+        {
+            throw new Copilot.CopilotAuditUnavailableException();
+        }
+        tx.Commit();
+        return Copilot.CopilotReleasePolicy.Released(receipt);
+    }
+
     public CasePackResetCommitResult CommitBlockedVariantReset(
         CaseScope scope, long expectedRevision, string actor, string commandId, string variant,
         DateTimeOffset? auditAt = null)

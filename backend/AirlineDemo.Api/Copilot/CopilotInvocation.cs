@@ -4,7 +4,8 @@ using AirlineDemo.Api.Reviews;
 
 namespace AirlineDemo.Api.Copilot;
 
-public sealed record CopilotInvocationResult(IResult Result, int HttpStatus, string ResultCode, CopilotOutcome Outcome);
+/// <summary>An operation result; <c>OutcomeRecorded</c> is set when the store already appended the outcome in its own transaction.</summary>
+public sealed record CopilotInvocationResult(IResult Result, int HttpStatus, string ResultCode, CopilotOutcome Outcome, bool OutcomeRecorded = false);
 
 /// <summary>
 /// Wraps one copilot operation in durable admission and outcome records. The provenance is chosen by the calling
@@ -15,8 +16,13 @@ public static class CopilotInvocation
 {
     public const int ClientClosedRequest = 499;
 
-    public static async Task<IResult> RunAsync(ICopilotInvocationLedger ledger, ICaseStateStore cases, DemoSession? session,
+    public static Task<IResult> RunAsync(ICopilotInvocationLedger ledger, ICaseStateStore cases, DemoSession? session,
         string operation, CopilotProvenance provenance, string? caseId, Func<CancellationToken, Task<CopilotInvocationResult>> work,
+        CancellationToken cancellationToken) =>
+        RunAsync(ledger, cases, session, operation, provenance, caseId, (_, token) => work(token), cancellationToken);
+
+    public static async Task<IResult> RunAsync(ICopilotInvocationLedger ledger, ICaseStateStore cases, DemoSession? session,
+        string operation, CopilotProvenance provenance, string? caseId, Func<CopilotAdmission, CancellationToken, Task<CopilotInvocationResult>> work,
         CancellationToken cancellationToken)
     {
         CopilotAdmission admission;
@@ -24,7 +30,7 @@ public static class CopilotInvocation
         catch (CopilotAuditUnavailableException) { return AuditUnavailable(); }
 
         CopilotInvocationResult result;
-        try { result = await work(cancellationToken); }
+        try { result = await work(admission, cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             try { await ledger.Outcome(admission, ClientClosedRequest, "cancelled", CopilotOutcome.Cancelled, CancellationToken.None); }
@@ -32,6 +38,7 @@ public static class CopilotInvocation
             throw;
         }
 
+        if (result.OutcomeRecorded) return result.Result;
         try { await ledger.Outcome(admission, result.HttpStatus, result.ResultCode, result.Outcome, cancellationToken); }
         catch (CopilotAuditUnavailableException) { return AuditUnavailable(); }
         return result.Result;

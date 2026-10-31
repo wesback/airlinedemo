@@ -847,6 +847,44 @@ public sealed class CaseStateStore : ICaseStateStore
         }
     }
 
+    public Copilot.CopilotApiResult CommitCopilotRelease(CaseScope scope, Copilot.CopilotReleaseCommit commit)
+    {
+        var proposals = commit.Proposals as Copilot.InMemoryCopilotProposalStore
+            ?? throw new NotSupportedException("The file-backed store releases only with in-memory proposals.");
+        lock (_gate)
+        {
+            using var fileLock = AcquireFileLock();
+            _cases = Load(_path);
+            var current = Current(scope);
+            lock (proposals.SyncRoot)
+            {
+                var entry = proposals.Find(commit.ProposalId);
+                if (Copilot.CopilotReleasePolicy.Evaluate(commit, entry, current) is { } rejected) return rejected;
+
+                var revision = current.Revision + 1;
+                var audit = current.Audit.ToList();
+                audit.Add(new AuditEvent(audit.Count + 1, revision, commit.Actor, Decisions.ReleaseEndpoints.ReleaseAction,
+                    Copilot.CopilotReleasePolicy.AuditDetail(entry!.Proposal.Note), commit.Time.GetUtcNow()));
+                var receipt = Copilot.CopilotReleasePolicy.Receipt(entry.Proposal, revision, audit.Count);
+                var previous = _cases;
+                var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = Freeze(current with { Revision = revision, Audit = audit }) };
+
+                proposals.Consume(entry, new Copilot.CopilotReleaseReceipt(commit.Fingerprint, receipt));
+                try { Persist(snapshot); }
+                catch { proposals.Restore(entry); throw; }
+                try { commit.Ledger.AppendAsync(commit.Outcome, CancellationToken.None).GetAwaiter().GetResult(); }
+                catch
+                {
+                    proposals.Restore(entry);
+                    Persist(previous);
+                    throw new Copilot.CopilotAuditUnavailableException();
+                }
+                _cases = snapshot;
+                return Copilot.CopilotReleasePolicy.Released(receipt);
+            }
+        }
+    }
+
     /// <summary>
     /// Holds an exclusive lock file so commits from other store instances on the same path are serialized.
     /// Callers reload the file after acquiring it, so revision checks see the latest persisted state.

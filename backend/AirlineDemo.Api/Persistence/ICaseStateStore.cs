@@ -36,6 +36,15 @@ public interface ICaseStateStore
         DateTimeOffset? auditAt = null) =>
         throw new NotSupportedException("Case-pack blocked-variant reset is not supported by this store.");
 
+    /// <summary>
+    /// Atomically revalidates and releases the case from an approved copilot proposal: inside one commit boundary it
+    /// checks the live session, the exact tuple, the approved unexpired state, the revision and the release gates, then
+    /// consumes the proposal, appends the release audit, increments the revision, stores the receipt and appends the
+    /// ledger outcome. Any failure leaves none of them changed.
+    /// </summary>
+    Copilot.CopilotApiResult CommitCopilotRelease(CaseScope scope, Copilot.CopilotReleaseCommit commit) =>
+        throw new NotSupportedException("Copilot release is not supported by this store.");
+
     IReadOnlyList<WorkItem> ListWorkItems(CaseScope scope);
 
     CommitResult CreateWorkItem(CaseScope scope, long expectedRevision, WorkItemDraft draft, string actor);

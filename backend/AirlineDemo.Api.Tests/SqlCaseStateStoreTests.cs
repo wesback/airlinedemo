@@ -22,7 +22,7 @@ public sealed class SqlCaseStateStoreTests
     private static readonly string[] InterfaceMethods =
     [
         "AuthorizeCase", "OwnerOf", "CreateCase", "Read", "GetBasisVersion", "ReadAudit",
-        "ListAssessments", "FindAssessment", "ListRequestReceipts", "Commit", "CommitBlockedVariantReset",
+        "ListAssessments", "FindAssessment", "ListRequestReceipts", "Commit", "CommitBlockedVariantReset", "CommitCopilotRelease",
         "ListWorkItems", "CreateWorkItem", "ChangeWorkItemState", "AppendTrace", "FindTrace",
     ];
 

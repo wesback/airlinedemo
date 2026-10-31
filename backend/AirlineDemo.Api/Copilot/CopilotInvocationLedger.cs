@@ -34,6 +34,8 @@ public interface ICopilotInvocationLedger
         CancellationToken cancellationToken = default);
     Task Outcome(CopilotAdmission admission, int httpStatus, string resultCode, CopilotOutcome outcome,
         CancellationToken cancellationToken = default);
+    /// <summary>Builds the outcome row for a store that appends it inside its own transaction (the copilot release).</summary>
+    CopilotInvocationRecord OutcomeRecord(CopilotAdmission admission, int httpStatus, string resultCode, CopilotOutcome outcome);
     /// <summary>The keyed, nonreversible reference for a user id, as recorded in the ledger.</summary>
     string CallerRef(string userId);
     /// <summary>The keyed, nonreversible reference for an exact demo session id, as recorded in the ledger.</summary>
@@ -78,14 +80,17 @@ public sealed class CopilotInvocationLedger(ICopilotInvocationStore store, TimeP
     }
 
     public Task Outcome(CopilotAdmission admission, int httpStatus, string resultCode, CopilotOutcome outcome,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        Append(OutcomeRecord(admission, httpStatus, resultCode, outcome),
+            "Copilot invocation outcome could not be recorded after admission; further dispatch was stopped.", cancellationToken);
+
+    public CopilotInvocationRecord OutcomeRecord(CopilotAdmission admission, int httpStatus, string resultCode, CopilotOutcome outcome)
     {
         if (!ResultCodes.Contains(resultCode)) throw new ArgumentOutOfRangeException(nameof(resultCode));
-        var record = admission.Record with
+        return admission.Record with
         {
             Phase = "outcome", At = time.GetUtcNow(), Outcome = outcome.ToString().ToLowerInvariant(), HttpStatus = httpStatus, ResultCode = resultCode,
         };
-        return Append(record, "Copilot invocation outcome could not be recorded after admission; further dispatch was stopped.", cancellationToken);
     }
 
     private async Task Append(CopilotInvocationRecord record, string diagnostic, CancellationToken cancellationToken)
@@ -164,14 +169,16 @@ public sealed class SqlCopilotInvocationStore(DbContextOptions<CaseStateDbContex
     public async Task AppendAsync(CopilotInvocationRecord record, CancellationToken cancellationToken)
     {
         await using var db = new CaseStateDbContext(options);
-        db.CopilotInvocations.Add(new CopilotInvocationRow
-        {
-            InvocationId = record.InvocationId, Phase = record.Phase, AtTicks = record.At.UtcTicks, Operation = record.Operation,
-            Provenance = record.Provenance, CallerRef = record.CallerRef, SessionRef = record.SessionRef, Role = record.Role,
-            AuthorizedCaseRef = record.AuthorizedCaseRef, Outcome = record.Outcome, HttpStatus = record.HttpStatus, ResultCode = record.ResultCode,
-        });
+        db.CopilotInvocations.Add(ToRow(record));
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    internal static CopilotInvocationRow ToRow(CopilotInvocationRecord record) => new()
+    {
+        InvocationId = record.InvocationId, Phase = record.Phase, AtTicks = record.At.UtcTicks, Operation = record.Operation,
+        Provenance = record.Provenance, CallerRef = record.CallerRef, SessionRef = record.SessionRef, Role = record.Role,
+        AuthorizedCaseRef = record.AuthorizedCaseRef, Outcome = record.Outcome, HttpStatus = record.HttpStatus, ResultCode = record.ResultCode,
+    };
 
     public async Task<IReadOnlyList<CopilotInvocationRecord>> ReadCaseAsync(string authorizedCaseRef, CancellationToken cancellationToken)
     {

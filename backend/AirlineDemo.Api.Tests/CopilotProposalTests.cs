@@ -1,14 +1,20 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Copilot;
 using AirlineDemo.Api.Decisions;
+using AirlineDemo.Api.Finance;
 using AirlineDemo.Api.Persistence;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace AirlineDemo.Api.Tests;
 
@@ -21,8 +27,8 @@ public sealed class CopilotProposalTests : IAsyncDisposable
     private readonly List<string> _paths = [];
     private readonly List<WebApplicationFactory<Program>> _factories = [];
     private readonly AdjustableTime _time = new();
-    private readonly WebApplicationFactory<Program> _factory;
-    private readonly HttpClient _client;
+    private WebApplicationFactory<Program> _factory;
+    private HttpClient _client;
 
     private sealed class AdjustableTime : TimeProvider
     {
@@ -37,7 +43,7 @@ public sealed class CopilotProposalTests : IAsyncDisposable
 
     public CopilotProposalTests() => (_factory, _client) = Build(null);
 
-    private (WebApplicationFactory<Program>, HttpClient) Build(Action<IServiceCollection>? configure)
+    private (WebApplicationFactory<Program>, HttpClient) Build(Action<IServiceCollection, string>? configure)
     {
         var path = Path.Combine(Path.GetTempPath(), $"copilot-proposal-{Guid.NewGuid():N}.json");
         _paths.Add(path);
@@ -50,7 +56,7 @@ public sealed class CopilotProposalTests : IAsyncDisposable
             builder.ConfigureTestServices(services =>
             {
                 services.AddSingleton<TimeProvider>(_time);
-                configure?.Invoke(services);
+                configure?.Invoke(services, path);
             });
         });
         _factories.Add(factory);
@@ -291,5 +297,400 @@ public sealed class CopilotProposalTests : IAsyncDisposable
         Assert.Equal(Decided(declined, "declined", expiresAt), (await Decision(presenter, declined, "decline")).Body);
         Assert.Equal((HttpStatusCode.Conflict, Error("confirmation_state_conflict")), Status(await Decision(presenter, declined, "approve")));
         Assert.Equal(0, Releases(CaseA));
+    }
+
+    // ---- Slice 5: atomic release, receipt and replay ----
+
+    private const string Note = "Release to the next lessee.";
+
+    public class ReleaseBarrierCaseStore : DispatchProxy
+    {
+        public ICaseStateStore Inner { get; set; } = null!;
+        public Action? BeforeRelease;
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod!.Name == nameof(ICaseStateStore.CommitCopilotRelease)) Interlocked.Exchange(ref BeforeRelease, null)?.Invoke();
+            try { return targetMethod.Invoke(Inner, args); }
+            catch (TargetInvocationException exception) when (exception.InnerException is not null) { throw exception.InnerException; }
+        }
+    }
+
+    // Edge ledger store that refuses the fresh release's outcome row while switched on.
+    private sealed class ToggleLedger : ICopilotInvocationStore
+    {
+        public readonly InMemoryCopilotInvocationStore Inner = new();
+        public volatile bool FailRelease;
+        public Task AppendAsync(CopilotInvocationRecord record, CancellationToken cancellationToken) =>
+            FailRelease && record is { Phase: "outcome", Operation: "advance_stage", ResultCode: "ok" }
+                ? throw new InvalidOperationException("ledger offline") : Inner.AppendAsync(record, cancellationToken);
+        public Task<IReadOnlyList<CopilotInvocationRecord>> ReadCaseAsync(string caseRef, CancellationToken cancellationToken) =>
+            Inner.ReadCaseAsync(caseRef, cancellationToken);
+    }
+
+    private void Use(Action<IServiceCollection, string> configure) => (_factory, _client) = Build(configure);
+
+    private DbContextOptions<CaseStateDbContext> UseSql()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"copilot-release-{Guid.NewGuid():N}.db");
+        _paths.Add(path);
+        var options = new DbContextOptionsBuilder<CaseStateDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
+        using (var db = new CaseStateDbContext(options)) db.Database.Migrate();
+        Use((services, _) =>
+        {
+            services.RemoveAll<ICaseStateStore>();
+            services.AddSingleton<ICaseStateStore>(new SqlCaseStateStore(options));
+            services.RemoveAll<ICopilotInvocationStore>();
+            services.AddSingleton<ICopilotInvocationStore>(new SqlCopilotInvocationStore(options));
+            services.RemoveAll<ICopilotProposalStore>();
+            services.AddSingleton<ICopilotProposalStore>(new SqlCopilotProposalStore(options));
+        });
+        return options;
+    }
+
+    private static void Sql(DbContextOptions<CaseStateDbContext> options, string statement)
+    {
+        using var db = new CaseStateDbContext(options);
+        db.Database.ExecuteSqlRaw(statement);
+    }
+
+    private CaseState State(string caseId = CaseA) { var (store, scope) = Scope(caseId); return store.Read(scope); }
+
+    private void Gate(string caseId, string action, string decision)
+    {
+        var (store, scope) = Scope(caseId);
+        store.Commit(scope, store.Read(scope).Revision, new CaseCommit(null, null, "presenter", action, JsonSerializer.Serialize(new { decision })));
+    }
+
+    private void Unblock(string caseId = CaseA)
+    {
+        Gate(caseId, FinanceEndpoints.ReserveDecisionAction, "approve");
+        Gate(caseId, FinanceEndpoints.LegalDecisionAction, "signed-off");
+        Assert.Empty(ReleaseEndpoints.Blockers(State(caseId)));
+    }
+
+    private string Approved(DemoSession session, string caseId = CaseA)
+    {
+        var proposalId = Create(session, Note, caseId);
+        Assert.Equal(200, Service.Decide(session, caseId, proposalId, "approve").Status);
+        return proposalId;
+    }
+
+    // Dispatches the release exactly as the advance tool does: one admitted invocation per call.
+    private async Task<(int Status, string Body)> Advance(DemoSession? session, string proposalId, long revision, string? note = Note,
+        string caseId = CaseA)
+    {
+        var services = _factory.Services;
+        var result = await CopilotInvocation.RunAsync(services.GetRequiredService<ICopilotInvocationLedger>(),
+            services.GetRequiredService<ICaseStateStore>(), session, "advance_stage", CopilotProvenance.TrustedUi, caseId,
+            (admission, _) => Task.FromResult(Service.Release(admission, session, caseId, revision, note, proposalId).ToInvocation()),
+            CancellationToken.None);
+        var http = new DefaultHttpContext { RequestServices = services };
+        using var stream = new MemoryStream();
+        http.Response.Body = stream;
+        await result.ExecuteAsync(http);
+        return (http.Response.StatusCode, Encoding.UTF8.GetString(stream.ToArray()));
+    }
+
+    private static string Receipt(string proposalId, long revision, int auditSequence, string caseId = CaseA) =>
+        $$"""{"contractVersion":1,"proposalId":"{{proposalId}}","caseId":"{{caseId}}","decision":"released","revision":{{revision}},"auditSequence":{{auditSequence}},"simulated":true}""";
+
+    private static string Blocked(params string[] blockers) =>
+        new JsonObject
+        {
+            ["contractVersion"] = 1,
+            ["error"] = new JsonObject { ["code"] = "release_blocked", ["blockers"] = new JsonArray([.. blockers.Select(item => (JsonNode)item)]) },
+        }.ToJsonString();
+
+    private async Task<CopilotInvocationRecord[]> ReleaseOutcomes(string caseId = CaseA) =>
+        [.. (await _factory.Services.GetRequiredService<ICopilotInvocationStore>().ReadCaseAsync(caseId, CancellationToken.None))
+            .Where(item => item is { Phase: "outcome", Operation: "advance_stage" })];
+
+    private CopilotProposalEntry Entry(string proposalId) =>
+        _factory.Services.GetRequiredService<ICopilotProposalStore>().Find(Guid.Parse(proposalId))!;
+
+    [Fact]
+    public async Task ProductionHost_AdvanceStage_ApprovalBinding()
+    {
+        Unblock();
+        var presenter = Session("presenter", CpCases);
+        var revision = Revision(CaseA);
+        var pending = Create(presenter);
+        var declined = Create(presenter);
+        Assert.Equal(200, Service.Decide(presenter, CaseA, declined, "decline").Status);
+        var cancelled = Create(presenter);
+        Assert.Equal(200, Service.Decide(presenter, CaseA, cancelled, "cancel").Status);
+        var approved = Approved(presenter);
+
+        foreach (var (call, status, code) in new (Func<Task<(int, string)>>, int, string)[]
+        {
+            (() => Advance(presenter, pending, revision), 409, "confirmation_required"),
+            (() => Advance(presenter, declined, revision), 409, "confirmation_declined"),
+            (() => Advance(presenter, cancelled, revision), 409, "confirmation_cancelled"),
+            (() => Advance(presenter, approved, revision, note: null), 400, "release_note_required"),
+            (() => Advance(presenter, approved, revision, note: " "), 400, "invalid_release_note"),
+            (() => Advance(presenter, approved, revision, note: "Another note."), 409, "confirmation_mismatch"),
+            (() => Advance(presenter, approved, revision + 1), 409, "confirmation_mismatch"),
+            (() => Advance(presenter, approved, revision, caseId: "cp-case-b"), 409, "confirmation_mismatch"),
+            (() => Advance(SameUserNewSession(presenter), approved, revision), 404, "confirmation_not_found"),
+            (() => Advance(Session("presenter", CpCases), approved, revision), 404, "confirmation_not_found"),
+            (() => Advance(presenter, Guid.NewGuid().ToString("D"), revision), 404, "confirmation_not_found"),
+            (() => Advance(presenter, "not-a-guid", revision), 404, "confirmation_not_found"),
+            (() => Advance(Session("executive", CpCases), approved, revision), 403, "forbidden"),
+            (() => Advance(null, approved, revision), 401, "unauthenticated"),
+        })
+        {
+            Assert.Equal((status, Error(code)), await call());
+        }
+        Assert.Equal((revision, 0, CopilotProposalStates.Approved), (Revision(CaseA), Releases(CaseA), Entry(approved).State));
+
+        // An approved proposal at exactly its expiry cannot release; the exact approved tuple releases once before it.
+        _time.Now = Start.AddMinutes(5);
+        Assert.Equal((410, Error("confirmation_expired")), await Advance(presenter, approved, revision));
+        _time.Now = Start.AddMinutes(5).AddMilliseconds(-1);
+        var auditSequence = State().Audit.Count + 1;
+        Assert.Equal((200, Receipt(approved, revision + 1, auditSequence)), await Advance(presenter, approved, revision));
+        Assert.Equal((revision + 1, 1), (Revision(CaseA), Releases(CaseA)));
+    }
+
+    [Fact]
+    public async Task ProductionHost_AdvanceStage_ExistingReleasePolicy()
+    {
+        var presenter = Session("presenter", CpCases);
+        Unblock();
+
+        // Each gate alone blocks with the same blocker the existing release endpoint reports.
+        foreach (var (action, decision, blocker) in new[]
+        {
+            (FinanceEndpoints.ReserveDecisionAction, "return", "reserve_not_approved"),
+            (FinanceEndpoints.LegalDecisionAction, "rejected", "obligations_not_signed_off"),
+        })
+        {
+            Gate(CaseA, action, decision);
+            var revision = Revision(CaseA);
+            Assert.Equal((409, Blocked(blocker)), await Advance(presenter, Approved(presenter), revision));
+            Unblock();
+        }
+
+        // Case C's technical review is not accepted; with both other gates open all three block, in the existing order.
+        Gate("cp-case-c", FinanceEndpoints.ReserveDecisionAction, "return");
+        Gate("cp-case-c", FinanceEndpoints.LegalDecisionAction, "rejected");
+        var caseC = Revision("cp-case-c");
+        Assert.Equal((409, Blocked("technical_review_not_accepted", "reserve_not_approved", "obligations_not_signed_off")),
+            await Advance(presenter, Approved(presenter, "cp-case-c"), caseC, caseId: "cp-case-c"));
+
+        // A revision change after approval is stale; a release by another proposal makes a later one already released.
+        var stale = Approved(presenter);
+        var staleRevision = Revision(CaseA);
+        Unblock();
+        Assert.Equal((409, Error("stale_revision")), await Advance(presenter, stale, staleRevision));
+        var first = Approved(presenter);
+        var released = Revision(CaseA);
+        Assert.Equal(200, (await Advance(presenter, first, released)).Status);
+        var later = Approved(presenter);
+        Assert.Equal((409, Error("already_released")), await Advance(presenter, later, released + 1));
+        Assert.Equal((released + 1, 1, 0), (Revision(CaseA), Releases(CaseA), Releases("cp-case-c")));
+        Assert.Equal((CopilotProposalStates.Approved, CopilotProposalStates.Approved), (Entry(stale).State, Entry(later).State));
+    }
+
+    [Fact]
+    public async Task ProductionHost_ReleaseAtomicCommit_AllStoredInvariants()
+    {
+        foreach (var sql in new[] { false, true })
+        {
+            if (sql) UseSql();
+            Unblock();
+            var presenter = Session("presenter", CpCases);
+            var before = State();
+            var proposalId = Approved(presenter);
+            var (status, body) = await Advance(presenter, proposalId, before.Revision);
+            var receipt = Receipt(proposalId, before.Revision + 1, before.Audit.Count + 1);
+            Assert.Equal((200, receipt), (status, body));
+
+            var after = State();
+            Assert.Equal(before.Revision + 1, after.Revision);
+            Assert.Equal(before.Audit, after.Audit.Take(before.Audit.Count));
+            Assert.Equal(new AuditEvent(before.Audit.Count + 1, before.Revision + 1, presenter.User.Id, ReleaseEndpoints.ReleaseAction,
+                $$"""{"decision":"released","note":"{{Note}}"}""", Start), after.Audit[^1]);
+            var entry = Entry(proposalId);
+            var fingerprint = CopilotReleasePolicy.Fingerprint(entry.Proposal);
+            Assert.Equal((CopilotProposalStates.Consumed, new CopilotReleaseReceipt(fingerprint, receipt)), (entry.State, entry.Receipt));
+            var outcome = Assert.Single(await ReleaseOutcomes());
+            Assert.Equal(("succeeded", 200, "ok", "trusted-ui"), (outcome.Outcome, outcome.HttpStatus, outcome.ResultCode, outcome.Provenance));
+            if (!sql)
+            {
+                var reloaded = new CaseStateStore(_paths[^1]);
+                Assert.Equal(after.Audit, reloaded.Read(reloaded.AuthorizeCase(CaseA, reloaded.OwnerOf(CaseA)!)).Audit);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ProductionHost_ReleaseRace_ReadCheckVersusCommit()
+    {
+        ReleaseBarrierCaseStore? barrier = null;
+        Use((services, _) =>
+        {
+            var descriptor = services.Single(item => item.ServiceType == typeof(ICaseStateStore));
+            services.Remove(descriptor);
+            services.AddSingleton<ICaseStateStore>(provider =>
+            {
+                var proxy = DispatchProxy.Create<ICaseStateStore, ReleaseBarrierCaseStore>();
+                barrier = (ReleaseBarrierCaseStore)(object)proxy;
+                barrier.Inner = (ICaseStateStore)descriptor.ImplementationFactory!.Invoke(provider);
+                return proxy;
+            });
+        });
+        Unblock();
+        var presenter = Session("presenter", CpCases);
+
+        // The revision changes between the service's checks and the store's commit boundary.
+        var raced = Approved(presenter);
+        var revision = Revision(CaseA);
+        barrier!.BeforeRelease = () => Gate(CaseA, FinanceEndpoints.ReserveDecisionAction, "approve");
+        Assert.Equal((409, Error("stale_revision")), await Advance(presenter, raced, revision));
+        Assert.Equal((revision + 1, 0, CopilotProposalStates.Approved), (Revision(CaseA), Releases(CaseA), Entry(raced).State));
+
+        // The session is revoked between the checks and the commit.
+        var revoked = Approved(presenter);
+        revision = Revision(CaseA);
+        barrier.BeforeRelease = () => _factory.Services.GetRequiredService<DemoSessionStore>().Remove(presenter.Id);
+        Assert.Equal((401, Error("unauthenticated")), await Advance(presenter, revoked, revision));
+        Assert.Equal((revision, 0, CopilotProposalStates.Approved), (Revision(CaseA), Releases(CaseA), Entry(revoked).State));
+        Assert.DoesNotContain(await ReleaseOutcomes(), item => item.ResultCode == "ok");
+    }
+
+    [Fact]
+    public async Task ProductionHost_ReleaseParallelRetry_OneBusinessChange()
+    {
+        Unblock();
+        var presenter = Session("presenter", CpCases);
+        var before = State();
+        var proposalId = Approved(presenter);
+        var replies = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => Task.Run(() => Advance(presenter, proposalId, before.Revision))));
+        var receipt = Receipt(proposalId, before.Revision + 1, before.Audit.Count + 1);
+        Assert.Equal([(200, receipt), (200, receipt)], replies);
+        Assert.Equal((before.Revision + 1, 1, before.Audit.Count + 1), (Revision(CaseA), Releases(CaseA), State().Audit.Count));
+        var outcomes = await ReleaseOutcomes();
+        Assert.Equal(2, outcomes.Length);
+        Assert.Equal(2, outcomes.Select(item => item.InvocationId).Distinct().Count());
+        Assert.All(outcomes, item => Assert.Equal((200, "ok"), (item.HttpStatus, item.ResultCode)));
+    }
+
+    [Fact]
+    public async Task ProductionHost_ReleaseAtomicFailure_CommitReceiptAuditRollback()
+    {
+        var (failPersist, failConsume) = (false, false);
+        var ledger = new ToggleLedger();
+        Use((services, path) =>
+        {
+            services.RemoveAll<ICaseStateStore>();
+            services.AddSingleton<ICaseStateStore>(new CaseStateStore(path, () => { if (failPersist) throw new IOException("disk full"); }));
+            services.RemoveAll<ICopilotProposalStore>();
+            services.AddSingleton<ICopilotProposalStore>(provider => new InMemoryCopilotProposalStore(
+                ((CaseStateStore)provider.GetRequiredService<ICaseStateStore>()).SyncRoot,
+                () => { if (failConsume) throw new InvalidOperationException("receipt store offline"); }));
+            services.RemoveAll<ICopilotInvocationStore>();
+            services.AddSingleton<ICopilotInvocationStore>(ledger);
+        });
+        Unblock();
+        var presenter = Session("presenter", CpCases);
+        var before = State();
+        var proposalId = Approved(presenter);
+
+        async Task Fails(Action arm, Action disarm, int status, string code)
+        {
+            arm();
+            Assert.Equal((status, Error(code)), await Advance(presenter, proposalId, before.Revision));
+            disarm();
+            var reloaded = new CaseStateStore(_paths[^1]);
+            Assert.Equal(before.Audit, reloaded.Read(reloaded.AuthorizeCase(CaseA, reloaded.OwnerOf(CaseA)!)).Audit);
+            Assert.Equal(before.Revision, State().Revision);
+            Assert.Equal(before.Audit, State().Audit);
+            Assert.Equal((CopilotProposalStates.Approved, (CopilotReleaseReceipt?)null), (Entry(proposalId).State, Entry(proposalId).Receipt));
+            Assert.DoesNotContain(await ReleaseOutcomes(), item => item.ResultCode == "ok");
+        }
+
+        await Fails(() => failPersist = true, () => failPersist = false, 503, "release_unavailable");
+        await Fails(() => failConsume = true, () => failConsume = false, 503, "release_unavailable");
+        await Fails(() => ledger.FailRelease = true, () => ledger.FailRelease = false, 503, "audit_unavailable");
+
+        // Nothing partial remains, so the same approved proposal still releases exactly once.
+        Assert.Equal((200, Receipt(proposalId, before.Revision + 1, before.Audit.Count + 1)), await Advance(presenter, proposalId, before.Revision));
+        Assert.Equal(1, Releases(CaseA));
+    }
+
+    [Fact]
+    public async Task ProductionHost_ReleaseAtomicFailure_SqlTransactionRollback()
+    {
+        var options = UseSql();
+        Unblock();
+        var presenter = Session("presenter", CpCases);
+        var before = State();
+        var proposalId = Approved(presenter);
+        foreach (var (table, when, code) in new[]
+        {
+            ("copilot_release_receipts", "", "release_unavailable"),
+            ("case_events", "", "release_unavailable"),
+            ("copilot_invocations", "WHEN NEW.ResultCode = 'ok' AND NEW.Operation = 'advance_stage'", "audit_unavailable"),
+        })
+        {
+            Sql(options, $"CREATE TRIGGER fault BEFORE INSERT ON {table} {when} BEGIN SELECT RAISE(ABORT, 'fault'); END;");
+            Assert.Equal((503, Error(code)), await Advance(presenter, proposalId, before.Revision));
+            Sql(options, "DROP TRIGGER fault;");
+            Assert.Equal(before.Revision, State().Revision);
+            Assert.Equal(before.Audit, State().Audit);
+            Assert.Equal((CopilotProposalStates.Approved, (CopilotReleaseReceipt?)null), (Entry(proposalId).State, Entry(proposalId).Receipt));
+            Assert.DoesNotContain(await ReleaseOutcomes(), item => item.ResultCode == "ok");
+        }
+        Assert.Equal((200, Receipt(proposalId, before.Revision + 1, before.Audit.Count + 1)), await Advance(presenter, proposalId, before.Revision));
+    }
+
+    [Fact]
+    public async Task ProductionHost_ReleaseExactReplay_OriginalReceiptBytes()
+    {
+        Unblock();
+        var presenter = Session("presenter", CpCases);
+        var revision = Revision(CaseA);
+        var proposalId = Approved(presenter);
+        var original = await Advance(presenter, proposalId, revision);
+        Assert.Equal(200, original.Status);
+
+        // After expiry and a later revision change the exact retry returns the original bytes without a second release.
+        _time.Now = Start.AddMinutes(30);
+        Gate(CaseA, FinanceEndpoints.ReserveDecisionAction, "approve");
+        var audit = State().Audit;
+        Assert.Equal(original, await Advance(presenter, proposalId, revision));
+        Assert.Equal((revision + 2, 1), (Revision(CaseA), Releases(CaseA)));
+        Assert.Equal(audit, State().Audit);
+        Assert.Equal(CopilotProposalStates.Consumed, Entry(proposalId).State);
+        Assert.Equal(2, (await ReleaseOutcomes()).Count(item => item.ResultCode == "ok"));
+    }
+
+    [Fact]
+    public async Task ProductionHost_ReleaseReplayMismatch_NoEffects()
+    {
+        Unblock();
+        var presenter = Session("presenter", CpCases);
+        var revision = Revision(CaseA);
+        var proposalId = Approved(presenter);
+        var original = await Advance(presenter, proposalId, revision);
+        var audit = State().Audit;
+
+        foreach (var (call, status, code) in new (Func<Task<(int, string)>>, int, string)[]
+        {
+            (() => Advance(presenter, proposalId, revision, note: "A different note."), 409, "replay_mismatch"),
+            (() => Advance(presenter, proposalId, revision + 1), 409, "replay_mismatch"),
+            (() => Advance(presenter, proposalId, revision, caseId: "cp-case-b"), 409, "replay_mismatch"),
+            (() => Advance(SameUserNewSession(presenter), proposalId, revision), 404, "confirmation_not_found"),
+            (() => Advance(Session("presenter", CpCases), proposalId, revision), 404, "confirmation_not_found"),
+        })
+        {
+            Assert.Equal((status, Error(code)), await call());
+        }
+        Assert.Equal((revision + 1, 1, 0), (Revision(CaseA), Releases(CaseA), Releases("cp-case-b")));
+        Assert.Equal(audit, State().Audit);
+        Assert.Equal(original.Body, Entry(proposalId).Receipt!.Bytes);
+        Assert.Equal(original, await Advance(presenter, proposalId, revision));
     }
 }

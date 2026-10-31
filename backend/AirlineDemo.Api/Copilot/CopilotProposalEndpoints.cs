@@ -7,8 +7,11 @@ using AirlineDemo.Api.Persistence;
 
 namespace AirlineDemo.Api.Copilot;
 
-/// <summary>One copilot API outcome: the status, the closed result code and the body (or the exact stored bytes).</summary>
-public sealed record CopilotApiResult(int Status, string Code, JsonObject Body, string? Raw = null)
+/// <summary>
+/// One copilot API outcome: the status, the closed result code and the body (or the exact stored bytes). <c>Recorded</c>
+/// is set when the store already appended the ledger outcome in the same transaction as the business change.
+/// </summary>
+public sealed record CopilotApiResult(int Status, string Code, JsonObject Body, string? Raw = null, bool Recorded = false)
 {
     public static CopilotApiResult Error(int status, string code, IReadOnlyList<string>? blockers = null)
     {
@@ -24,7 +27,7 @@ public sealed record CopilotApiResult(int Status, string Code, JsonObject Body, 
         ? Results.Text(Raw, "application/json", Encoding.UTF8, Status)
         : Results.Json(Body, statusCode: Status);
 
-    public CopilotInvocationResult ToInvocation() => new(ToHttp(), Status, Code, Outcome);
+    public CopilotInvocationResult ToInvocation() => new(ToHttp(), Status, Code, Outcome, Recorded);
 }
 
 /// <summary>
@@ -32,7 +35,8 @@ public sealed record CopilotApiResult(int Status, string Code, JsonObject Body, 
 /// visible to the presenter user and exact demo session that created it, for its own case.
 /// </summary>
 public sealed class CopilotProposalService(
-    ICopilotProposalStore proposals, ICopilotInvocationLedger ledger, CopilotProjections projections, ICaseStateStore cases, TimeProvider time)
+    ICopilotProposalStore proposals, ICopilotInvocationLedger ledger, CopilotProjections projections, ICaseStateStore cases, TimeProvider time,
+    DemoSessionStore sessions, ICopilotInvocationStore invocations)
 {
     public const string Warning = "Simulated release: no lessee or external system is contacted.";
     private static readonly Dictionary<string, string> Decisions = new(StringComparer.Ordinal)
@@ -86,6 +90,39 @@ public sealed class CopilotProposalService(
             ["contractVersion"] = CopilotProjections.ContractVersion, ["proposalId"] = entry!.Proposal.ProposalId.ToString("D"), ["caseId"] = caseId,
             ["state"] = entry.State, ["expiresAt"] = entry.Proposal.ExpiresAt,
         });
+    }
+
+    /// <summary>
+    /// Releases from an approved proposal, or replays its original receipt, in one atomic store operation (FR-010,
+    /// FR-011). The ledger outcome of a fresh release is appended inside that operation.
+    /// </summary>
+    public CopilotApiResult Release(CopilotAdmission admission, DemoSession? session, string caseId, long expectedRevision, string? rawNote,
+        string proposalId)
+    {
+        if (Presenter(session, caseId, out var scope) is { } denied) return denied;
+        if (rawNote is null) return CopilotApiResult.Error(400, "release_note_required");
+        if (NormalizeNote(rawNote) is not { } note) return CopilotApiResult.Error(400, "invalid_release_note");
+        if (!Guid.TryParseExact(proposalId, "D", out var id)) return CopilotApiResult.Error(404, "confirmation_not_found");
+        var (callerRef, sessionRef) = (ledger.CallerRef(session!.User.Id), ledger.SessionRef(session.Id));
+        var commit = new CopilotReleaseCommit(id, callerRef, sessionRef,
+            CopilotReleasePolicy.Fingerprint(id, callerRef, sessionRef, caseId, CopilotProposal.FinalRelease, expectedRevision, note),
+            expectedRevision, session.User.Id, time, () => Revalidate(session, caseId),
+            ledger.OutcomeRecord(admission, 200, "ok", CopilotOutcome.Succeeded), proposals, invocations);
+        try { return cases.CommitCopilotRelease(scope!, commit); }
+        catch (CopilotAuditUnavailableException) { return CopilotApiResult.Error(503, "audit_unavailable"); }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return CopilotApiResult.Error(503, "release_unavailable");
+        }
+    }
+
+    // Runs inside the store's commit boundary: the session must still be live, the same user, a presenter and in scope.
+    private CopilotApiResult? Revalidate(DemoSession session, string caseId)
+    {
+        var live = sessions.Find(session.Id);
+        if (live is null || live.User.Id != session.User.Id) return CopilotApiResult.Error(401, "unauthenticated");
+        if (live.User.Role != ReleaseEndpoints.ReleaseRole) return CopilotApiResult.Error(403, "forbidden");
+        return live.User.CaseScopes.Contains(caseId, StringComparer.Ordinal) ? null : CopilotApiResult.Error(404, "case_not_found");
     }
 
     /// <summary>The trimmed note when the raw note is 1 to 2000 UTF-16 units with a nonempty trim; otherwise null.</summary>

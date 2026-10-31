@@ -25,8 +25,8 @@ public static class CopilotProposalStates
     public const string Consumed = "consumed";
 }
 
-/// <summary>The immutable proposal with its separate mutable lifecycle state.</summary>
-public sealed record CopilotProposalEntry(CopilotProposal Proposal, string State)
+/// <summary>The immutable proposal with its separate mutable lifecycle state and, once consumed, the release receipt.</summary>
+public sealed record CopilotProposalEntry(CopilotProposal Proposal, string State, CopilotReleaseReceipt? Receipt = null)
 {
     /// <summary>Pending and approved proposals are expired from exactly <c>ExpiresAt</c>; approval never extends it.</summary>
     public string EffectiveState(DateTimeOffset now) =>
@@ -50,7 +50,7 @@ public interface ICopilotProposalStore
 /// In-memory proposals for the file-backed case store. The lock is the case store's commit lock, so lifecycle changes
 /// and the release commit are serialized by one lock.
 /// </summary>
-public sealed class InMemoryCopilotProposalStore(object syncRoot) : ICopilotProposalStore
+public sealed class InMemoryCopilotProposalStore(object syncRoot, Action? beforeConsume = null) : ICopilotProposalStore
 {
     private readonly Dictionary<Guid, CopilotProposalEntry> _entries = [];
 
@@ -78,6 +78,21 @@ public sealed class InMemoryCopilotProposalStore(object syncRoot) : ICopilotProp
             if (next(entry) is { } state) _entries[proposalId] = entry = entry with { State = state };
             return entry;
         }
+    }
+
+    // Called by the file-backed case store inside its commit lock.
+    internal void Consume(CopilotProposalEntry entry, CopilotReleaseReceipt receipt)
+    {
+        lock (SyncRoot)
+        {
+            beforeConsume?.Invoke();
+            _entries[entry.Proposal.ProposalId] = entry with { State = CopilotProposalStates.Consumed, Receipt = receipt };
+        }
+    }
+
+    internal void Restore(CopilotProposalEntry entry)
+    {
+        lock (SyncRoot) _entries[entry.Proposal.ProposalId] = entry;
     }
 }
 
@@ -142,9 +157,11 @@ public sealed class SqlCopilotProposalStore(DbContextOptions<CaseStateDbContext>
     {
         var row = db.CopilotProposals.AsNoTracking().SingleOrDefault(item => item.ProposalId == proposalId);
         var state = db.CopilotProposalStates.AsNoTracking().SingleOrDefault(item => item.ProposalId == proposalId);
+        var receipt = db.CopilotReleaseReceipts.AsNoTracking().SingleOrDefault(item => item.ProposalId == proposalId);
         return row is null || state is null ? null : new CopilotProposalEntry(new CopilotProposal(row.ProposalId, row.CallerRef, row.SessionRef,
             row.CaseId, row.Action, row.ExpectedRevision, row.Note, new DateTimeOffset(row.CreatedAtTicks, TimeSpan.Zero),
-            new DateTimeOffset(row.ExpiresAtTicks, TimeSpan.Zero)), state.State);
+            new DateTimeOffset(row.ExpiresAtTicks, TimeSpan.Zero)), state.State,
+            receipt is null ? null : new CopilotReleaseReceipt(receipt.Fingerprint, receipt.Receipt));
     }
 }
 
