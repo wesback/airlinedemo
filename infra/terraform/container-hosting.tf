@@ -166,6 +166,12 @@ resource "azurerm_container_app" "app" {
         value = "true"
       }
 
+      # The copilot MCP and Q&A routes accept only this exact same-origin browser Origin and Host.
+      env {
+        name  = "Copilot__AllowedOrigins"
+        value = "https://${local.container_app_name}.${azurerm_container_app_environment.demo.default_domain}"
+      }
+
       env {
         name        = "Demo__Passcode"
         secret_name = "demo-passcode"
