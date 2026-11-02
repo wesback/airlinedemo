@@ -35,3 +35,11 @@ resource "azurerm_private_dns_zone_virtual_network_link" "executor" {
   private_dns_zone_name = azurerm_private_dns_zone.demo[each.key].name
   virtual_network_id    = var.deployment_executor.vnet_id
 }
+
+resource "azurerm_private_dns_zone_virtual_network_link" "monitor_executor" {
+  for_each              = var.deployment_executor == null ? {} : local.monitor_private_dns_zones
+  name                  = "deployment-executor"
+  resource_group_name   = azurerm_resource_group.demo.name
+  private_dns_zone_name = azurerm_private_dns_zone.monitor[each.key].name
+  virtual_network_id    = var.deployment_executor.vnet_id
+}

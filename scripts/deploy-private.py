@@ -225,18 +225,50 @@ terraform -chdir=infra/terraform state list
         """Temporary private bridge for reviewing/destroying the previous stack."""
         executor = f"/subscriptions/{self.args.subscription_id}/resourceGroups/{self.rg}/providers/Microsoft.Network/virtualNetworks/vnet-{self.args.prefix}-deploy"
         application = f"/subscriptions/{self.args.subscription_id}/resourceGroups/{self.app_rg}/providers/Microsoft.Network/virtualNetworks/vnet-demo"
+        resources = {}
         for group, network, name, remote in (
             (self.rg, f"vnet-{self.args.prefix}-deploy", f"{self.args.prefix}-application", application),
             (self.app_rg, "vnet-demo", "deployment-executor", executor),
         ):
-            run("az", "network", "vnet", "peering", "create", "-g", group,
-                "--vnet-name", network, "-n", name, "--remote-vnet", remote,
-                "--allow-vnet-access", "-o", "none")
+            existing = [peer for peer in az("network", "vnet", "peering", "list", "-g", group, "--vnet-name", network)
+                        if peer["name"] == name]
+            if existing:
+                if existing[0]["remoteVirtualNetwork"]["id"].lower() != remote.lower() or not existing[0]["allowVirtualNetworkAccess"]:
+                    raise RuntimeError(f"Existing peering {name} has unexpected connectivity; refusing to overwrite it.")
+            else:
+                run("az", "network", "vnet", "peering", "create", "-g", group,
+                    "--vnet-name", network, "-n", name, "--remote-vnet", remote,
+                    "--allow-vnet-access", "-o", "none")
+            address = ("azurerm_virtual_network_peering.executor_to_app[0]" if group == self.rg
+                       else "azurerm_virtual_network_peering.app_to_executor[0]")
+            network_id = executor if group == self.rg else application
+            resources[address] = f"{network_id}/virtualNetworkPeerings/{name}"
+        zones = {
+            "privatelink.database.windows.net": ("executor", "sql"),
+            "privatelink.openai.azure.com": ("executor", "model"),
+            "privatelink.vaultcore.azure.net": ("executor", "kv"),
+            "privatelink.azurecr.io": ("executor", "acr"),
+            "privatelink.cognitiveservices.azure.com": ("executor", "contentsafety"),
+            "privatelink.monitor.azure.com": ("monitor_executor", "monitor"),
+            "privatelink.oms.opinsights.azure.com": ("monitor_executor", "oms"),
+            "privatelink.ods.opinsights.azure.com": ("monitor_executor", "ods"),
+            "privatelink.agentsvc.azure-automation.net": ("monitor_executor", "agentsvc"),
+        }
         for zone in az("network", "private-dns", "zone", "list", "-g", self.app_rg):
-            if zone["name"] != "privatelink.blob.core.windows.net":
-                run("az", "network", "private-dns", "link", "vnet", "create",
-                    "-g", self.app_rg, "-z", zone["name"], "-n", "deployment-executor",
+            if zone["name"] not in zones:
+                continue
+            existing = [link for link in az("network", "private-dns", "link", "vnet", "list",
+                                           "-g", self.app_rg, "-z", zone["name"]) if link["name"] == "deployment-executor"]
+            if existing:
+                if existing[0]["virtualNetwork"]["id"].lower() != executor.lower():
+                    raise RuntimeError("Existing DNS link targets an unexpected VNet; refusing to overwrite it.")
+            else:
+                run("az", "network", "private-dns", "link", "vnet", "create", "-g", self.app_rg,
+                    "-z", zone["name"], "-n", "deployment-executor",
                     "--virtual-network", executor, "--registration-enabled", "false", "-o", "none")
+            resource, key = zones[zone["name"]]
+            resources[f'azurerm_private_dns_zone_virtual_network_link.{resource}["{key}"]'] = (
+                zone["id"] + "/virtualNetworkLinks/deployment-executor")
         endpoint = az("network", "private-endpoint", "show", "-g", self.app_rg, "-n", "pe-blob")
         nic = az("network", "nic", "show", "--ids", endpoint["networkInterfaces"][0]["id"])
         address = nic["ipConfigurations"][0]["privateIPAddress"]
@@ -254,6 +286,11 @@ for host in ('{self.account}.blob.core.windows.net', '{self.vault}.vault.azure.n
 PY
 az keyvault certificate show --vault-name {self.vault} --name release-image-signing-certificate --query id -o tsv
 """)
+        write_private(self.directory / "bridge.json", json.dumps({
+            "resources": resources,
+            "executor": {"vnet_id": executor,
+                         "blob_dns_zone_id": f"/subscriptions/{self.args.subscription_id}/resourceGroups/{self.rg}/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"},
+        }))
 
     def prepare(self):
         destination = self.directory / "fresh"
@@ -563,9 +600,24 @@ terraform -chdir=infra/terraform show -no-color /var/lib/airlinedemo/application
 
     def plan_destroy(self):
         self.connect()
-        self.execute("""terraform -chdir=infra/terraform init -input=false -reconfigure -backend-config="$BACKEND_CONFIG_FILE"
+        bridge = base64.b64encode((self.directory / "bridge.json").read_bytes()).decode()
+        self.execute(f"""terraform -chdir=infra/terraform init -input=false -reconfigure -backend-config="$BACKEND_CONFIG_FILE"
 backup="/var/lib/airlinedemo/state-before-destroy-$(date -u +%Y%m%dT%H%M%SZ).json"
 terraform -chdir=infra/terraform state pull > "$backup"
+export TFVARS_FILE=/var/lib/airlinedemo/destroy.tfvars.json
+export BRIDGE='{bridge}'
+python3 - <<'PY'
+import base64, json, os, subprocess
+bridge = json.loads(base64.b64decode(os.environ['BRIDGE']))
+with open('operator-settings/deploy.tfvars.json') as source: config = json.load(source)
+config['deployment_executor'] = bridge['executor']
+with open(os.environ['TFVARS_FILE'], 'w') as destination: json.dump(config, destination)
+addresses = set(subprocess.check_output(['terraform', '-chdir=infra/terraform', 'state', 'list'], text=True).splitlines())
+for address, resource_id in bridge['resources'].items():
+    if address not in addresses:
+        subprocess.run(['terraform', '-chdir=infra/terraform', 'import', '-var-file=' + os.environ['TFVARS_FILE'],
+                        address, resource_id], check=True)
+PY
 terraform -chdir=infra/terraform state list > /var/lib/airlinedemo/state-addresses.txt
 for address in azurerm_key_vault_certificate.signing 'azurerm_key_vault_secret.build_runner_token[0]'; do
   if grep -Fqx "$address" /var/lib/airlinedemo/state-addresses.txt; then
@@ -577,6 +629,9 @@ terraform -chdir=infra/terraform show -no-color /var/lib/airlinedemo/destroy.tfp
 terraform -chdir=infra/terraform show -json /var/lib/airlinedemo/destroy.tfplan | python3 -c '
 import collections,json,sys
 changes=json.load(sys.stdin)["resource_changes"]
+retained = ("azurerm_key_vault_certificate.signing", "azurerm_key_vault_secret.build_runner_token[0]")
+if any(c["address"] in retained and c["change"]["actions"] != ["no-op"] for c in changes):
+    raise SystemExit("Destroy plan must not delete retained signing or runner material")
 print("Destroy plan actions:",dict(collections.Counter("/".join(c["change"]["actions"]) for c in changes)))
 print("Retained certificate/token are outside this destroy; full plan and pre-destroy state backup are on the executor.")
 '
@@ -600,11 +655,12 @@ scripts/destroy-deployment.sh --check-plan /var/lib/airlinedemo/destroy.tfplan
         self.execute("scripts/destroy-deployment.sh --yes --apply-plan /var/lib/airlinedemo/destroy.tfplan")
         if az("group", "exists", "-n", self.app_rg):
             raise RuntimeError("Application resource group still exists after destroy.")
-        run("az", "network", "vnet", "peering", "delete", "-g", self.rg,
-            "--vnet-name", f"vnet-{self.args.prefix}-deploy", "-n", f"{self.args.prefix}-application", "-o", "none")
-        run("az", "network", "private-dns", "record-set", "a", "delete", "-g", self.rg,
-            "-z", "privatelink.blob.core.windows.net", "-n", f"st{self.args.prefix}{self.account[-6:]}",
-            "--yes", "-o", "none")
+        storage = f"st{self.args.prefix}{self.account[-6:]}"
+        records = az("network", "private-dns", "record-set", "a", "list", "-g", self.rg,
+                     "-z", "privatelink.blob.core.windows.net")
+        if any(record["name"] == storage for record in records):
+            run("az", "network", "private-dns", "record-set", "a", "delete", "-g", self.rg,
+                "-z", "privatelink.blob.core.windows.net", "-n", storage, "--yes", "-o", "none")
         write_private(self.directory / "destroyed.json", json.dumps({"resource_group": self.app_rg, "completed": True}))
 
     def verify(self):

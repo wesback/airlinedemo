@@ -158,6 +158,58 @@ class PrivateDeploymentTests(unittest.TestCase):
         run.assert_called_once_with("az", "keyvault", "update", "-n", instance.vault,
                                     "--public-network-access", "Disabled", "-o", "none")
 
+    @patch.object(deployment, "run")
+    @patch.object(deployment, "az")
+    def test_existing_bridge_is_verified_and_recorded_without_recreating_links(self, az, run):
+        instance = self.executor()
+        instance.args.prefix = "demo1"
+        instance.args.subscription_id = "00000000-0000-0000-0000-000000000000"
+        instance.app_rg, instance.account, instance.vault = "rg-demo1", "sttest", "kv-test"
+        instance.execute = Mock()
+        scope = "/subscriptions/" + instance.args.subscription_id + "/resourceGroups/"
+        executor = scope + instance.rg + "/providers/Microsoft.Network/virtualNetworks/vnet-demo1-deploy"
+        application = scope + instance.app_rg + "/providers/Microsoft.Network/virtualNetworks/vnet-demo"
+        zone = {"name": "privatelink.vaultcore.azure.net",
+                "id": scope + instance.app_rg + "/providers/Microsoft.Network/privateDnsZones/privatelink.vaultcore.azure.net"}
+
+        def azure(*args):
+            if args[:4] == ("network", "vnet", "peering", "list"):
+                return [{"name": "demo1-application" if args[5] == instance.rg else "deployment-executor",
+                         "remoteVirtualNetwork": {"id": application if args[5] == instance.rg else executor},
+                         "allowVirtualNetworkAccess": True}]
+            if args[:4] == ("network", "private-dns", "zone", "list"):
+                return [zone]
+            if args[:5] == ("network", "private-dns", "link", "vnet", "list"):
+                return [{"name": "deployment-executor", "virtualNetwork": {"id": executor}}]
+            if args[:3] == ("network", "private-endpoint", "show"):
+                return {"networkInterfaces": [{"id": "synthetic-nic"}]}
+            if args[:3] == ("network", "nic", "show"):
+                return {"ipConfigurations": [{"privateIPAddress": "10.20.2.4"}]}
+            raise AssertionError(args)
+
+        az.side_effect = azure
+        with tempfile.TemporaryDirectory() as directory:
+            instance.directory = Path(directory)
+            instance.connect()
+            bridge = json.loads((instance.directory / "bridge.json").read_text())
+            self.assertEqual(3, len(bridge["resources"]))
+            self.assertEqual(zone["id"] + "/virtualNetworkLinks/deployment-executor",
+                             bridge["resources"]['azurerm_private_dns_zone_virtual_network_link.executor["kv"]'])
+        self.assertEqual(1, run.call_count)
+        self.assertEqual(("az", "network", "private-dns", "record-set", "a", "add-record"), run.call_args.args[:6])
+
+    @patch.object(deployment, "run")
+    @patch.object(deployment, "az")
+    def test_bridge_does_not_overwrite_peering_to_another_network(self, az, run):
+        instance = self.executor()
+        instance.args.prefix, instance.args.subscription_id = "demo1", "synthetic-subscription"
+        instance.app_rg = "rg-demo1"
+        az.return_value = [{"name": "demo1-application", "remoteVirtualNetwork": {"id": "/unrelated"},
+                            "allowVirtualNetworkAccess": True}]
+        with self.assertRaisesRegex(RuntimeError, "Existing peering demo1-application has unexpected connectivity"):
+            instance.connect()
+        run.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

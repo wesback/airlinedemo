@@ -17,6 +17,12 @@ resource "azurerm_storage_container" "evidence" {
   name                  = "evidence"
   storage_account_id    = azurerm_storage_account.blob.id
   container_access_type = "private"
+  depends_on = [
+    azurerm_private_endpoint.demo,
+    azurerm_private_dns_zone_virtual_network_link.executor,
+    azurerm_virtual_network_peering.app_to_executor,
+    azurerm_virtual_network_peering.executor_to_app,
+  ]
 }
 
 # App identity: model invocation, evidence container, and telemetry publishing.

@@ -21,6 +21,8 @@ run "independent_executor_uses_peering_and_shared_blob_dns" {
       !contains(keys(azurerm_private_dns_zone_virtual_network_link.executor), "blob") &&
       azurerm_private_dns_zone_virtual_network_link.demo["blob"].resource_group_name == "rg-demo-tfstate" &&
       azurerm_private_dns_zone_virtual_network_link.demo["blob"].private_dns_zone_name == "privatelink.blob.core.windows.net" &&
+      length(azurerm_private_dns_zone_virtual_network_link.monitor_executor) == 4 &&
+      alltrue([for link in azurerm_private_dns_zone_virtual_network_link.monitor_executor : link.virtual_network_id == var.deployment_executor.vnet_id]) &&
       local.blob_dns_zone_id == var.deployment_executor.blob_dns_zone_id
     )
     error_message = "The executor and app must share one Blob namespace, not conflicting linked zones."
@@ -34,6 +36,7 @@ run "original_network_creates_no_executor_bridge" {
       length(azurerm_virtual_network_peering.app_to_executor) == 0 &&
       length(azurerm_virtual_network_peering.executor_to_app) == 0 &&
       length(azurerm_private_dns_zone_virtual_network_link.executor) == 0 &&
+      length(azurerm_private_dns_zone_virtual_network_link.monitor_executor) == 0 &&
       contains(keys(azurerm_private_dns_zone.demo), "blob")
     )
     error_message = "Without an executor configuration the original network must remain unchanged."

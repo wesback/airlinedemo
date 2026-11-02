@@ -225,7 +225,10 @@ scripts/deploy.sh --tenant-id <tenant-id> --subscription-id <subscription-id> \
 
 Planning teardown first connects the independent executor to the old app
 network and verifies private state/vault resolution. It saves the complete
-pre-destroy state, then removes only the signing-certificate and runner-token
+pre-destroy state and imports the verified temporary peerings/DNS links into the
+application state. Terraform dependencies retain that connectivity until
+data-plane resource deletion completes, then remove the links before their DNS
+zones. It then removes only the signing-certificate and runner-token
 resource addresses from Terraform state so destroy does not delete their active
 versions. **This changes ownership even though no resources are deleted yet.**
 If teardown is abandoned, re-import those exact retained objects before an

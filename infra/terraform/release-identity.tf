@@ -79,11 +79,14 @@ resource "azurerm_key_vault_certificate" "signing" {
   name         = var.signing_certificate_name
   key_vault_id = azurerm_key_vault.kv.id
 
-  # Data-plane access needs the Terraform principal's role and the vault's private endpoint or deployer perimeter.
+  # Keep private executor connectivity until the data-plane operation completes, including destroy.
   depends_on = [
     azurerm_role_assignment.terraform_kv_certificates,
     azurerm_private_endpoint.demo,
     azurerm_private_dns_zone_virtual_network_link.demo,
+    azurerm_private_dns_zone_virtual_network_link.executor,
+    azurerm_virtual_network_peering.app_to_executor,
+    azurerm_virtual_network_peering.executor_to_app,
     azurerm_network_security_perimeter_association.key_vault,
   ]
 
