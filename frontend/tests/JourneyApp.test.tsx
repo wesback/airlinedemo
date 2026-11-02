@@ -43,6 +43,113 @@ function stubApi(overrides: Record<string, (init?: RequestInit) => Response> = {
   vi.stubGlobal('fetch', fetchMock);
 }
 
+const arrivalSources = ['technical', 'maintenance', 'finance', 'records', 'contracts'] as const;
+const arrivalPermissions: Record<string, readonly string[]> = {
+  presenter: [],
+  'technical-reviewer': ['technical', 'maintenance', 'records'],
+  'finance-reviewer': ['technical', 'finance'],
+  'legal-reviewer': ['records', 'contracts'],
+};
+
+function stubArrivalScenario(initialState: 'not_started' | 'collecting' = 'not_started') {
+  const sessions: Record<string, { id: string; displayName: string; role: string; caseScopes: string[]; csrfToken: string }> = {
+    presenter: { id: 'presenter', displayName: 'Pat Presenter', role: 'presenter', caseScopes: ['case-001'], csrfToken: 'csrf-presenter' },
+    reviewer: { id: 'reviewer', displayName: 'Riley Reviewer', role: 'technical-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-reviewer' },
+    'fin-1': { id: 'fin-1', displayName: 'Fin Analyst', role: 'finance-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-finance' },
+    'legal-1': { id: 'legal-1', displayName: 'Lee Legal', role: 'legal-reviewer', caseScopes: ['case-001'], csrfToken: 'csrf-legal' },
+  };
+  let activeSession = sessions.presenter;
+  let revision = 1;
+  let arrivalState: 'not_started' | 'collecting' | 'ready' = initialState;
+  const pinned = new Set<string>();
+  const audit: { sequence: number; revision: number; actor: string; action: string; detail: string; at: string }[] = [];
+  const projectedAudit = () => audit.map((event) => {
+    if (event.action !== 'arrival.source_read') return event;
+    const detail = JSON.parse(event.detail) as { sourceId: string; recordRefs?: unknown[]; [key: string]: unknown };
+    if (arrivalPermissions[activeSession.role].includes(detail.sourceId)) return event;
+    const { recordRefs: _recordRefs, ...safeDetail } = detail;
+    return { ...event, detail: JSON.stringify(safeDetail) };
+  });
+  const appendAudit = (actor: string, action: string, detail = '') => {
+    revision += 1;
+    audit.push({ sequence: audit.length + 1, revision, actor, action, detail, at });
+  };
+  const status = () => {
+    const missingSources = arrivalState === 'ready' ? [] : arrivalSources.filter((sourceId) => !pinned.has(sourceId));
+    return { contractVersion: 1, caseId: 'case-001', caseRevision: revision, state: arrivalState, missingSources,
+      canComplete: arrivalState === 'collecting' && missingSources.length === 0 };
+  };
+  const routes: Record<string, (init?: RequestInit) => Response> = {
+    'GET /api/auth/users': () => json([
+      { id: 'presenter', displayName: 'Pat Presenter', role: 'presenter' },
+      { id: 'reviewer', displayName: 'Riley Reviewer', role: 'technical-reviewer' },
+      { id: 'fin-1', displayName: 'Fin Analyst', role: 'finance-reviewer' },
+      { id: 'legal-1', displayName: 'Lee Legal', role: 'legal-reviewer' },
+    ]),
+    'POST /api/auth/sign-in': () => json(sessions.presenter),
+    'POST /api/auth/switch-user': (init) => {
+      const { userId } = JSON.parse(String(init?.body)) as { userId: string };
+      activeSession = sessions[userId];
+      return json(activeSession);
+    },
+    'GET /api/cases/case-001': () => json({
+      caseId: 'case-001', revision, basis: pinned.size > 0 ? [{ version: pinned.size }] : [], audit: projectedAudit(),
+      arrival: status(),
+    }),
+    'GET /api/cases/case-001/history': () => json({ events: [] }),
+    'GET /api/cases/case-001/technical-reviews': () => json({ basisVersion: pinned.size, decisions: [] }),
+    'GET /api/cases/case-001/reserve': () => new Response(null, { status: 403 }),
+    'GET /api/cases/case-001/obligations': () => new Response(null, { status: 403 }),
+    'GET /api/cases/case-001/readiness': () => json({ sentence: 'Return in 9 months.' }),
+    'GET /api/v1/cases/case-001/copilot/activity': () => json({ contractVersion: 1, caseId: 'case-001', items: [] }),
+    'GET /api/v1/cases/case-001/arrival': () => json(status()),
+    'GET /api/v1/cases/case-001/sources': () => json({
+      contractVersion: 1, caseId: 'case-001', caseRevision: revision,
+      sources: arrivalSources.map((sourceId) => ({
+        sourceId, mode: 'available', capabilityLabel: 'Simulated', coverage: true,
+        ...(arrivalPermissions[activeSession.role].includes(sourceId) ? { recordCount: 2 } : {}),
+      })),
+    }),
+    'POST /api/v1/cases/case-001/arrival/start': (init) => {
+      const command = JSON.parse(String(init?.body)) as { expectedRevision: number };
+      if (command.expectedRevision !== revision) return json({ error: { code: 'stale_revision' } }, 409);
+      arrivalState = 'collecting';
+      appendAudit(activeSession.id, 'arrival.started');
+      return json({ contractVersion: 1 });
+    },
+    'POST /api/v1/cases/case-001/arrival/complete': (init) => {
+      const command = JSON.parse(String(init?.body)) as { expectedRevision: number };
+      if (command.expectedRevision !== revision || pinned.size !== arrivalSources.length)
+        return json({ error: { code: 'stale_revision' } }, 409);
+      arrivalState = 'ready';
+      appendAudit(activeSession.id, 'arrival.completed');
+      return json({ contractVersion: 1 });
+    },
+  };
+  for (const sourceId of arrivalSources) {
+    routes[`POST /api/v1/cases/case-001/arrival/sources/${sourceId}/retrieve`] = (init) => {
+      const command = JSON.parse(String(init?.body)) as { expectedRevision: number };
+      if (command.expectedRevision !== revision) return json({ error: { code: 'stale_revision' } }, 409);
+      if (!arrivalPermissions[activeSession.role].includes(sourceId))
+        return json({ error: { code: 'forbidden' } }, 403);
+      const priorRevision = revision;
+      pinned.add(sourceId);
+      const recordRefs = [{ sourceId, recordId: `${sourceId}-record-1`, recordVersion: 1 }];
+      appendAudit(activeSession.id, 'arrival.source_read', JSON.stringify({
+        contractVersion: 1, sourceId, role: activeSession.role, outcome: 'pinned', recordRefs,
+      }));
+      return json({ contractVersion: 1, commandId: 'ui-test', caseId: 'case-001', sourceId, outcome: 'pinned',
+        priorRevision, newRevision: revision, auditEventId: `audit-${revision}`, recordRefs });
+    };
+  }
+  stubApi(routes);
+  return {
+    fetchMock,
+    isPinned(sourceId: string) { return pinned.has(sourceId); },
+    getSession() { return activeSession; },
+  };
+}
+
 async function signInAs(name: string) {
   fireEvent.change(await screen.findByLabelText('Demo passcode'), { target: { value: 'demo' } });
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -131,6 +238,86 @@ describe('activity trail', () => {
 });
 
 describe('journey app', () => {
+  it('blocks the next gate with exact missing sources', async () => {
+    stubArrivalScenario('collecting');
+    window.history.replaceState({}, '', '/cases/case-001');
+    render(<App />);
+    await signInAs('Pat Presenter');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Records intake/ }));
+    expect(await screen.findByText('Missing sources: technical, maintenance, finance, records, contracts')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Send demo records package' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Next gate' }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: /AI investigation/ }));
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Record decision/ })).toBeNull();
+  });
+
+  it('preserves the open arrival case through authenticated reviewer handoffs', async () => {
+    const scenario = stubArrivalScenario();
+    window.history.replaceState({}, '', '/');
+    render(<App />);
+    await signInAs('Pat Presenter');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Boeing 737-8 N-DEMO1: Arrived' }));
+    expect(await screen.findByRole('heading', { name: 'N-DEMO1', level: 1 })).toBeTruthy();
+    expect(window.location.pathname).toBe('/cases/case-001');
+    fireEvent.click(await screen.findByRole('button', { name: 'Start arrival' }));
+    expect(await screen.findByText('Arrival started. Request records from each permitted source.')).toBeTruthy();
+
+    const switchFromSource = async (sourceId: string, label: string, role: string) => {
+      const panel = await screen.findByRole('article', { name: `${sourceId} source` });
+      fireEvent.click(within(panel).getByRole('button', { name: `Continue as ${label}` }));
+      await waitFor(() => expect(scenario.getSession().role).toBe(role));
+      expect(window.location.pathname).toBe('/cases/case-001');
+    };
+    const retrieve = async (sourceId: string) => {
+      const panel = await screen.findByRole('article', { name: `${sourceId} source` });
+      fireEvent.click(within(panel).getByRole('button', { name: 'Retrieve and pin records' }));
+      expect(await within(panel).findByText('Records retrieved and pinned.')).toBeTruthy();
+      await waitFor(() => expect(
+        (within(panel).getByRole('button', { name: 'Retrieve and pin records' }) as HTMLButtonElement).disabled,
+      ).toBe(false));
+      expect(scenario.isPinned(sourceId)).toBe(true);
+    };
+    const switchFromMenu = async (userId: string, displayName: string) => {
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(displayName) }));
+      fireEvent.click(screen.getByRole('menuitemradio', { name: /Demo presenter/ }));
+      await waitFor(() => expect(scenario.getSession().id).toBe(userId));
+      expect(window.location.pathname).toBe('/cases/case-001');
+    };
+
+    await switchFromSource('technical', 'Technical reviewer', 'technical-reviewer');
+    await retrieve('technical');
+    await switchFromMenu('presenter', 'Riley Reviewer');
+    const activity = await screen.findByRole('complementary', { name: 'Activity' });
+    expect(within(activity).getByText('technical source read: pinned')).toBeTruthy();
+    expect(within(activity).getByText('technical-reviewer')).toBeTruthy();
+    fireEvent.click(within(activity).getByRole('radio', { name: 'UI' }));
+    expect(within(activity).getByText('None')).toBeTruthy();
+    expect(within(activity).queryByText('technical-record-1')).toBeNull();
+    fireEvent.click(within(activity).getByRole('radio', { name: 'All' }));
+
+    await switchFromSource('technical', 'Technical reviewer', 'technical-reviewer');
+    await retrieve('maintenance');
+    await retrieve('records');
+    await switchFromSource('finance', 'Finance reviewer', 'finance-reviewer');
+    await retrieve('finance');
+    await switchFromSource('contracts', 'Legal reviewer', 'legal-reviewer');
+    await retrieve('contracts');
+    await switchFromMenu('presenter', 'Lee Legal');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Complete arrival' }));
+    expect(await screen.findByRole('heading', { name: 'Records package intake', level: 2 })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Send demo records package' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/cases/case-001');
+    fireEvent.click(screen.getByRole('button', { name: /AI investigation/ }));
+    expect(await screen.findByText('Starts after intake')).toBeTruthy();
+    expect(screen.queryByText('The records agent is queued')).toBeNull();
+    expect(arrivalSources.every((sourceId) => scenario.isPinned(sourceId))).toBe(true);
+  });
+
   it('opens the read-only compliance view from the case decision dossier', async () => {
     stubApi({
       'GET /api/v1/cases/cp-case-c/compliance-evidence': () => json({
@@ -150,7 +337,7 @@ describe('journey app', () => {
     expect(await screen.findByRole('heading', { name: 'Technical review', level: 2 })).toBeTruthy();
   });
 
-  it('navigates an authorized presenter to a separate source case without labelling it as a pool aircraft', async () => {
+  it('navigates an authorized presenter to a separate legacy source case without labelling it as a pool aircraft', async () => {
     const emptyEvidence = { basisVersion: 1, currentBasis: true, applicabilityAccess: 'permitted', regimes: [], untagged: [],
       basisDecision: null, decisions: [], responsibilities: { platform: [], customer: [], limitation: 'Evidence only.' } };
     stubApi({

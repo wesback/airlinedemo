@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
 using AirlineDemo.Api.Admission;
@@ -79,6 +80,7 @@ public static class EvidenceEndpoints
         EvidenceCaseReadSourceFactory caseSources,
         InvestigationExecutionService investigations,
         WorkloadAdmissionLimits admission,
+        ArrivalJourneyService arrival,
         IServiceProvider services,
         CancellationToken ct)
     {
@@ -87,6 +89,14 @@ public static class EvidenceEndpoints
         if (!DemoAuthEndpoints.HasValidAntiForgery(request.HttpContext, session)) return DemoAuthEndpoints.AntiForgeryFailed();
         if (session.User.Role != PresenterRole) return Results.Json(new { error = "Role not permitted." }, statusCode: StatusCodes.Status403Forbidden);
         if (!session.User.CaseScopes.Contains(caseId)) return Results.NotFound();
+
+        if (caseStore.OwnerOf(caseId) == ArrivalJourneyService.Owner)
+        {
+            var arrivalScope = caseStore.AuthorizeCase(caseId, ArrivalJourneyService.Owner);
+            var arrivalState = caseStore.Read(arrivalScope);
+            if (arrival.IsEnrolled(arrivalState) && ArrivalHandoffBlock(arrivalState, arrival) is { } blocked)
+                return blocked;
+        }
 
         // Keyed by the server session identity only; a multipart userId field is never read.
         if (!admission.TryAdmitPackage(session.User.Id))
@@ -150,6 +160,17 @@ public static class EvidenceEndpoints
         var handover = await RunInvestigationAsync(record, caseId, scope, session.User.Id, session.User.Role, caseSources, basis, services, investigations, ct);
         if (handover is not null) IntakeJourneyHandover.RecordInvestigation(caseStore, scope, record, handover);
         return created ? Results.Created($"/api/cases/{caseId}/packages/{packageId}", record) : Results.Ok(record);
+    }
+
+    private static IResult? ArrivalHandoffBlock(CaseState state, ArrivalJourneyService arrival)
+    {
+        if (state.Audit.Any(item => item.Action == ArrivalJourneyService.CompletionAction)) return null;
+        var missingSources = arrival.MissingSources(state);
+        return missingSources.Count > 0
+            ? Results.Json(new { contractVersion = 1, error = new { code = "arrival_sources_missing", missingSources } },
+                statusCode: StatusCodes.Status409Conflict)
+            : Results.Json(new { contractVersion = 1, error = new { code = "arrival_not_completed" } },
+                statusCode: StatusCodes.Status409Conflict);
     }
 
     private static async Task<InvestigationHandover?> RunInvestigationAsync(

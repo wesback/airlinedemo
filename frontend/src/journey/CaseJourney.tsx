@@ -22,13 +22,16 @@ const optional = <T,>(url: string) => getJson<T>(url).catch(() => null);
 
 export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, onChanged, onOpenCase }: Props) {
   const [data, setData] = useState<JourneyData | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [dataSessionId, setDataSessionId] = useState<string | null>(null);
+  const [failedSessionId, setFailedSessionId] = useState<string | null>(null);
   const [selected, setSelected] = useState<StepId | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [copilotTrail, setCopilotTrail] = useState<CopilotActivityItem[] | 'unavailable' | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
+    const activeGeneration = ++loadGeneration.current;
     try {
       const record = await getJson<CaseRecord>(caseUrl(caseId));
       const [history, reviews, reserve, obligations, readiness, copilot] = await Promise.all([
@@ -39,21 +42,35 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
         optional<Readiness>(caseUrl(caseId, '/readiness')),
         getCopilotActivity(caseId),
       ]);
+      if (activeGeneration !== loadGeneration.current) return;
       setCopilotTrail(copilot);
-      setData({ record, progress: deriveProgress(record), history, reviews, reserve, obligations, readiness });
-      setFailed(false);
+      setData({ record, progress: deriveProgress(record, history), history, reviews, reserve, obligations, readiness });
+      setDataSessionId(session.id);
+      setFailedSessionId(null);
     } catch {
-      setFailed(true);
+      if (activeGeneration !== loadGeneration.current) return;
+      setFailedSessionId(session.id);
     }
-  }, [caseId]);
+  }, [caseId, session.id]);
 
-  useEffect(() => { setData(null); setCopilotTrail(null); setSelected(null); setEvidenceOpen(false); void load(); }, [load, session.id]);
+  useEffect(() => {
+    setData(null);
+    setDataSessionId(null);
+    setFailedSessionId(null);
+    setCopilotTrail(null);
+    setSelected(null);
+    setEvidenceOpen(false);
+    void load();
+    return () => { loadGeneration.current += 1; };
+  }, [load]);
   useEffect(() => { headingRef.current?.focus(); }, [caseId]);
 
   const refresh = useCallback(async () => { await load(); onChanged(); }, [load, onChanged]);
 
   const aircraft = aircraftFor(caseId);
-  const sourceDemo = caseId === 'case-001';
+  const currentData = dataSessionId === session.id ? data : null;
+  const failed = failedSessionId === session.id;
+  const sourceDemo = caseId === 'case-001' && !currentData?.record.arrival;
   if (failed) {
     return (
       <main className="av-page" id="main">
@@ -63,7 +80,8 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
     );
   }
 
-  const progress = data?.progress;
+  const progress = currentData?.progress;
+  const arrivalIncomplete = Boolean(currentData?.record.arrival && !currentData.progress.arrivalReady);
   const activeId: StepId = selected ?? STEPS[progress?.stepIndex ?? 0].id;
   const activeIndex = STEPS.findIndex((step) => step.id === activeId);
   const step = STEPS[activeIndex];
@@ -99,12 +117,12 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
         </div>
       </section>
 
-      {!data ? <p className="av-loading" role="status">Loading the journey…</p> : (
+      {!currentData ? <p className="av-loading" role="status">Loading the journey…</p> : (
         <div className="av-journey-grid">
           <nav className="av-rail" aria-label="Journey steps">
             <ol>
               {STEPS.map((item, index) => {
-                const state = data.progress.states[item.id];
+                const state = currentData.progress.states[item.id];
                 return (
                   <li key={item.id}>
                     <button type="button" className={`av-rail-step is-${state}${item.id === activeId ? ' is-active' : ''}`}
@@ -135,11 +153,19 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
             </header>
             <p className="av-panel-desc">{step.description}</p>
             <div className="av-panel-body">
-              <StepPanel step={step} data={data} session={session} onChanged={async () => { setSelected(activeId); await refresh(); }} onSwitchPersona={onSwitchPersona} />
+              {arrivalIncomplete && activeId !== 'arrival' ? (
+                <div className="av-arrival-gate-blocker" role="alert">
+                  <strong>This gate is blocked until arrival is complete.</strong>
+                  {currentData.progress.missingSources.length > 0
+                    ? <p>Missing sources: {currentData.progress.missingSources.join(', ')}</p>
+                    : <p>The presenter must complete the arrival step before this gate can continue.</p>}
+                </div>
+              ) : <StepPanel step={step} data={currentData} session={session}
+                onChanged={async () => { setSelected(activeId === 'arrival' ? null : activeId); await refresh(); }} onSwitchPersona={onSwitchPersona} />}
             </div>
             <footer className="av-panel-foot">
               <button type="button" className="av-button av-button-ghost" disabled={activeIndex === 0} onClick={() => setSelected(STEPS[activeIndex - 1].id)}>Previous gate</button>
-              <button type="button" className="av-button av-button-secondary" disabled={activeIndex === STEPS.length - 1} onClick={() => setSelected(STEPS[activeIndex + 1].id)}>Next gate</button>
+              <button type="button" className="av-button av-button-secondary" disabled={activeIndex === STEPS.length - 1 || arrivalIncomplete} onClick={() => setSelected(STEPS[activeIndex + 1].id)}>Next gate</button>
             </footer>
             </>}
           </section>
@@ -151,12 +177,12 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
             <button type="button" className="av-button av-button-secondary" onClick={() => setEvidenceOpen(true)}>Compliance evidence</button>
           </aside>}
           {(() => {
-            const brief = aiBriefFor(data.record.caseId, data.history);
+            const brief = aiBriefFor(currentData.record.caseId, currentData.history);
             return brief && activeId !== 'investigation'
               ? <AiInsightCard brief={brief} onOpen={() => setSelected('investigation')} />
               : null;
           })()}
-          <ActivityTrail business={activityFrom(data.record.audit)} copilot={copilotTrail} />
+          <ActivityTrail business={activityFrom(currentData.record.audit)} copilot={copilotTrail} />
           </div>
         </div>
       )}

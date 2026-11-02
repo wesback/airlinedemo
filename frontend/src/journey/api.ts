@@ -55,12 +55,21 @@ export async function postPackage(caseId: string, csrfToken: string, files: File
 
 export type BasisVersion = { version: number; createdAt?: string };
 export type AuditEvent = { sequence: number; revision: number; actor: string; action: string; detail: string; at: string };
+export type ArrivalProjection = {
+  contractVersion: 1;
+  caseId: string;
+  caseRevision: number;
+  state: 'not_started' | 'collecting' | 'ready';
+  missingSources: string[];
+  canComplete: boolean;
+};
 export type CaseRecord = {
   caseId: string;
   owner?: string;
   revision: number;
   basis: BasisVersion[];
   audit: AuditEvent[];
+  arrival?: ArrivalProjection;
 };
 
 export type JourneyWitness = { witnessId: string; documentId: string; documentVersion: number; page: number };

@@ -57,6 +57,8 @@ builder.Services.AddSingleton<AircraftCasePackPublisher>();
 builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<MockResponseService>();
 builder.Services.AddSingleton<SourceModeStore>();
+builder.Services.AddSingleton<ArrivalJourneyService>();
+builder.Services.AddSingleton<GovernedSourceReader>();
 builder.Services.AddSingleton<SourceSummaryService>();
 builder.Services.AddSingleton<ICopilotTaskCards, MaintenanceSource>();
 builder.Services.AddSingleton<CopilotProjections>();
@@ -145,6 +147,7 @@ SourceFixtureLoader.Load(
 await app.Services.GetRequiredService<AircraftCasePackPublisher>().PublishAsync(
     app.Services.GetRequiredService<AircraftCasePackLoader>(), 0);
 DemoCaseSeeder.Seed(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>());
+ArrivalJourneyService.EnrollOptInCase(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>());
 DemoJourneySeeder.Seed(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>(),
     app.Services.GetRequiredService<EvidencePackageStore>());
 await DemoJourneySeeder.SeedSourceEvidenceAsync(app.Configuration, app.Services.GetRequiredService<ICaseStateStore>(),
@@ -176,6 +179,7 @@ app.MapReleaseEndpoints();
 app.MapCaseHistoryEndpoints();
 app.MapDemoRunReset();
 app.MapSourceModeEndpoints();
+app.MapArrivalJourneyEndpoints();
 app.MapSourceReadEndpoints();
 app.MapSourceSummaryEndpoints();
 app.MapCopilotProjectionEndpoints();

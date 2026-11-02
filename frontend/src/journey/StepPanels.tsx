@@ -4,6 +4,7 @@ import { actorName, aircraftFor, formatWhen, PERSONAS, STEPS, type CaseProgress,
 import { ActorGlyph, CheckIcon, DocumentIcon } from './Art';
 import { aiBriefFor } from './aiBriefs';
 import { AiBriefView, WhyReview } from './AiInsight';
+import ArrivalSources from './ArrivalSources';
 
 export type JourneyData = {
   record: CaseRecord;
@@ -35,7 +36,7 @@ export function StepPanel(props: PanelProps) {
   }
 }
 
-function ArrivalPanel({ data }: PanelProps) {
+function ArrivalPanel({ data, session, onChanged, onSwitchPersona }: PanelProps) {
   const aircraft = aircraftFor(data.record.caseId);
   return (
     <>
@@ -50,6 +51,8 @@ function ArrivalPanel({ data }: PanelProps) {
         <Fact label="Outgoing lessee" value={aircraft.outgoingLessee} />
         <Fact label="Next lessee" value={aircraft.nextLessee} />
       </dl>
+      <ArrivalSources key={`${data.record.caseId}:${session.id}`} caseId={data.record.caseId} session={session}
+        onChanged={onChanged} onSwitchPersona={onSwitchPersona} />
     </>
   );
 }
@@ -81,7 +84,7 @@ type UploadPhase = 'idle' | 'intake' | 'agent';
 function IntakePanel({ data, session, onChanged, onSwitchPersona }: PanelProps) {
   const basis = data.record.basis;
   const documents = documentsOf(data.history);
-  if (basis.length === 0) {
+  if (data.progress.states.intake !== 'done') {
     if (session.role !== 'presenter') {
       return (
         <div className="av-handoff">
@@ -206,7 +209,7 @@ function InvestigationPanel({ data }: PanelProps) {
   const events = (data.history?.events ?? []).filter((event) => event.capabilityLabel === 'AI agent');
   if (events.length === 0) {
     return (
-      <Empty title={data.record.basis.length ? 'The records agent is queued' : 'Starts after intake'}>
+      <Empty title={data.progress.states.intake === 'done' ? 'The records agent is queued' : 'Starts after intake'}>
         The records agent reads every document, cross-checks identities and life-limited parts, and cites its sources. It never makes a decision on its own.
       </Empty>
     );

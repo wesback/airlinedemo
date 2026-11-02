@@ -16,12 +16,14 @@ public static class DemoCaseSeeder
 
     public static void Seed(IConfiguration configuration, ICaseStateStore store)
     {
-        if (!bool.TryParse(configuration["Demo:SeedCases"], out var enabled) || !enabled)
+        var seedCases = bool.TryParse(configuration["Demo:SeedCases"], out var enabled) && enabled;
+        var arrivalJourney = bool.TryParse(configuration["Demo:ArrivalJourney"], out var arrivalEnabled) && arrivalEnabled;
+        if (!seedCases && !arrivalJourney)
         {
             return;
         }
 
-        foreach (var caseId in CaseIds)
+        foreach (var caseId in seedCases ? CaseIds : ["case-001"])
         {
             if (store.OwnerOf(caseId) is not null)
             {

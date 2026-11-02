@@ -246,7 +246,8 @@ public static class CopilotMcp
             return FromHttp(await SourceSummaryEndpoints.Get(1, args.CaseId!, http, sessions, cases, modes,
                 services.GetRequiredService<SourceSummaryService>()), http);
         var read = FromHttp(await SourceReadEndpoints.Read(1, args.CaseId!, args.SourceId!, args.RecordId, http, sessions, cases, modes,
-            services.GetRequiredService<SourceReadBudget>(), services.GetRequiredService<TimeProvider>(),
+            services.GetRequiredService<GovernedSourceReader>(), services.GetRequiredService<ArrivalJourneyService>(),
+            services.GetRequiredService<TimeProvider>(),
             services.GetRequiredService<ILogger<SourceReadBudget>>(), services.GetRequiredService<IHostEnvironment>()), http);
         if (read.Result is not ToolResult { IsError: false } success) return read;
         var envelope = success.Structured["result"]!.AsObject();

@@ -1,5 +1,5 @@
 import type { CopilotActivityItem } from './copilotApi';
-import type { AuditEvent, CaseRecord } from './api';
+import type { AuditEvent, CaseHistory, CaseRecord } from './api';
 
 export type Actor = 'ai' | 'human' | 'rules';
 export type AircraftCategory = 'narrow-body' | 'regional' | 'wide-body';
@@ -98,6 +98,8 @@ export type CaseProgress = {
   lastActivity: string | null;
   blocked: boolean;
   released: boolean;
+  arrivalReady: boolean;
+  missingSources: string[];
 };
 
 function decisionOf(audit: AuditEvent[], action: string): string | null {
@@ -121,19 +123,28 @@ export function actorKind(actor: string, action = ''): Actor {
   return 'human';
 }
 
-export function deriveProgress(record: CaseRecord): CaseProgress {
+const INVESTIGATION_EVENT_TYPES = new Set(['evidence-reviewed', 'findings-raised', 'finding-raised', 'investigation-escalated']);
+
+export function deriveProgress(record: CaseRecord, history?: CaseHistory | null): CaseProgress {
   const audit = record.audit ?? [];
   const hasBasis = (record.basis ?? []).length > 0;
-  const investigated = audit.some((item) => AI_ACTORS.has(item.actor) || item.action === 'create-work-item');
+  const arrivalReady = !record.arrival || record.arrival.state === 'ready';
+  const intakeRecorded = record.arrival
+    ? history?.events?.some((event) => event.eventType === 'package-received') ?? false
+    : hasBasis;
+  const intakeComplete = arrivalReady && intakeRecorded;
+  const investigated = record.arrival
+    ? history?.events?.some((event) => event.actorRole === 'records-agent' && INVESTIGATION_EVENT_TYPES.has(event.eventType)) ?? false
+    : audit.some((item) => AI_ACTORS.has(item.actor) || item.action === 'create-work-item');
   const technical = decisionOf(audit, 'technical-review.decided');
   const finance = decisionOf(audit, 'reserve.decided');
   const legal = decisionOf(audit, 'obligation.legal-decided');
   const released = audit.some((item) => item.action === 'aircraft.released');
 
   const done: Record<StepId, boolean> = {
-    arrival: true,
-    intake: hasBasis,
-    investigation: hasBasis && investigated,
+    arrival: arrivalReady,
+    intake: intakeComplete,
+    investigation: intakeComplete && investigated,
     technical: technical === 'accept',
     finance: technical === 'accept' && finance === 'approve',
     legal: technical === 'accept' && finance === 'approve' && legal === 'signed-off',
@@ -148,12 +159,14 @@ export function deriveProgress(record: CaseRecord): CaseProgress {
   if (legal === 'rejected') states.legal = 'returned';
   const blocked = technical === 'reject' || finance === 'return' || legal === 'rejected';
   const last = audit.length ? audit[audit.length - 1].at : null;
-  return { caseId: record.caseId, revision: record.revision, stepIndex, states, technical, finance, legal, lastActivity: last, blocked, released };
+  return { caseId: record.caseId, revision: record.revision, stepIndex, states, technical, finance, legal, lastActivity: last, blocked, released,
+    arrivalReady, missingSources: record.arrival?.missingSources ?? [] };
 }
 
 export function waitingOn(progress: CaseProgress): { actor: Actor; label: string } {
   const step = STEPS[progress.stepIndex];
   if (progress.states[step.id] === 'returned') return { actor: 'human', label: `Returned at ${step.short.toLowerCase()}` };
+  if (step.id === 'arrival') return { actor: 'rules', label: 'Arrived' };
   if (step.id === 'intake') return { actor: 'rules', label: 'Waiting for the records package' };
   if (step.id === 'investigation') return { actor: 'ai', label: 'AI agent investigating records' };
   if (progress.released) return { actor: 'human', label: 'Released to the next lessee' };
@@ -202,7 +215,23 @@ export function actorName(actor: string): string {
   return map[actor] ?? actor;
 }
 
-export type ActivityItem = { key: string; actor: Actor; who: string; what: string; reason: string | null; at: string };
+export type SourceReadReference = { sourceId: string; recordId: string; recordVersion: number };
+export type SourceReadActivity = {
+  sourceId: string;
+  role: string;
+  outcome: string;
+  errorCode: string | null;
+  recordRefs: SourceReadReference[];
+};
+export type ActivityItem = {
+  key: string;
+  actor: Actor;
+  who: string;
+  what: string;
+  reason: string | null;
+  at: string;
+  sourceRead?: SourceReadActivity;
+};
 
 export type TrailEntry =
   | { origin: 'ui'; key: string; at: string; item: ActivityItem }
@@ -222,6 +251,29 @@ export function mergeTrail(business: ActivityItem[], copilot: CopilotActivityIte
 
 const ROLE_NARRATION = new Set(['technical-reviewer', 'finance-reviewer', 'legal-reviewer']);
 
+function sourceReadOf(event: AuditEvent): SourceReadActivity | null {
+  if (event.action !== 'arrival.source_read') return null;
+  try {
+    const detail = JSON.parse(event.detail) as Record<string, unknown>;
+    if (typeof detail.sourceId !== 'string' || typeof detail.role !== 'string' || typeof detail.outcome !== 'string') return null;
+    const refs = Array.isArray(detail.recordRefs) ? detail.recordRefs.filter((item): item is SourceReadReference => {
+      if (typeof item !== 'object' || item === null) return false;
+      const ref = item as Record<string, unknown>;
+      return typeof ref.sourceId === 'string' && typeof ref.recordId === 'string'
+        && Number.isSafeInteger(ref.recordVersion) && (ref.recordVersion as number) > 0;
+    }) : [];
+    return {
+      sourceId: detail.sourceId,
+      role: detail.role,
+      outcome: detail.outcome,
+      errorCode: typeof detail.errorCode === 'string' ? detail.errorCode : null,
+      recordRefs: refs,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Audit trail as a readable timeline, newest first. Narration events that repeat a recorded decision are dropped. */
 export function activityFrom(audit: AuditEvent[]): ActivityItem[] {
   return audit
@@ -235,14 +287,17 @@ export function activityFrom(audit: AuditEvent[]): ActivityItem[] {
           reason = typeof value === 'string' ? value : null;
         } catch { reason = null; }
       }
+      const sourceRead = sourceReadOf(event);
       return {
         key: `${event.sequence}`,
         actor: actorKind(event.actor, event.action),
-        who: event.action === 'journey' && event.actor === 'presenter' ? 'Intake service'
+        who: sourceRead ? actorName(sourceRead.role)
+          : event.action === 'journey' && event.actor === 'presenter' ? 'Intake service'
           : event.action === 'aircraft.released' ? 'Transition lead' : actorName(event.actor),
-        what: humanizeAction(event),
+        what: sourceRead ? `${sourceRead.sourceId} source read: ${sourceRead.outcome}` : humanizeAction(event),
         reason,
         at: event.at,
+        ...(sourceRead ? { sourceRead } : {}),
       };
     })
     .reverse();
