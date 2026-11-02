@@ -58,6 +58,7 @@ builder.Services.AddSingleton<DemoRunReset>();
 builder.Services.AddSingleton<MockResponseService>();
 builder.Services.AddSingleton<SourceModeStore>();
 builder.Services.AddSingleton<SourceSummaryService>();
+builder.Services.AddSingleton<ICopilotTaskCards, MaintenanceSource>();
 builder.Services.AddSingleton<CopilotProjections>();
 builder.Services.AddSingleton<IDecisionDossierService, DecisionDossierService>();
 builder.Services.AddSingleton<EvidenceBasisStore>();

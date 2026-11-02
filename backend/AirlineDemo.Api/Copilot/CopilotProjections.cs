@@ -49,6 +49,7 @@ public sealed class CopilotProjections(
     IAircraftCasePackSnapshotStore snapshots,
     FinanceInputStore financeInputs,
     SourceModeStore sourceModes,
+    ICopilotTaskCards taskCards,
     TimeProvider time)
 {
     public const int ContractVersion = 1;
@@ -84,16 +85,22 @@ public sealed class CopilotProjections(
         if (domain is null)
             return new(CopilotProjectionOutcome.Ok, new CopilotStatusEnvelope(ContractVersion, caseId, summary.CaseRevision, summary.Status));
 
-        var refs = SourceSummaryService.ReadPins(state)
-            .Where(pin => SourceSummaryService.CanSeeDetails(role, pin.SourceId))
-            .Select(pin => new CopilotSourceRef(pin.SourceId, pin.RecordId, pin.RecordVersion))
+        var modes = sourceModes.ModesFor(state);
+        var pins = SourceSummaryService.ReadPins(state);
+        // Without basis pins, technical points reference the case's committed task cards while maintenance is available.
+        IEnumerable<CopilotSourceRef> candidates = pins.Count > 0
+            ? pins.Select(pin => new CopilotSourceRef(pin.SourceId, pin.RecordId, pin.RecordVersion))
+            : domain == "technical" && modes["maintenance"] == SourceModes.Available
+                ? taskCards.TaskCards(caseId).Select(card => new CopilotSourceRef("maintenance", card.RecordId, card.RecordVersion))
+                : [];
+        var refs = candidates
+            .Where(item => SourceSummaryService.CanSeeDetails(role, item.SourceId))
             .Distinct()
             .OrderBy(item => item.SourceId, StringComparer.Ordinal).ThenBy(item => item.RecordId, StringComparer.Ordinal)
             .ThenBy(item => item.RecordVersion).ToArray();
         if (refs.Length > MaxSourceRefs || refs.Any(item => !Identity.IsMatch(item.RecordId)))
             return new(CopilotProjectionOutcome.ContextInvalid);
 
-        var modes = sourceModes.ModesFor(state);
         var inputs = financeInputs.Find(caseId);
         var open = domain switch
         {

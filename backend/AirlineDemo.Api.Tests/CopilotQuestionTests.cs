@@ -719,6 +719,68 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
         Assert.Equal(2, await Proposals());
     }
 
+    private sealed class FlaggingScreener : ICopilotRecordScreener
+    {
+        public int Records;
+        public Task<IReadOnlyList<ScreeningVerdict>> ScreenAsync(IReadOnlyList<ScreeningRecord> records, ScreeningScope scope, CancellationToken cancellationToken)
+        {
+            Interlocked.Add(ref Records, records.Count);
+            return Task.FromResult<IReadOnlyList<ScreeningVerdict>>([.. records.Select(_ => new ScreeningVerdict(ScreeningVerdict.Detected, ["note"]))]);
+        }
+    }
+
+    // AC-049: a flagged task card observation adds no tool call; a model that then tries advance_stage is refused by the role gate.
+    [Fact]
+    public async Task ProductionHost_HostileModel_TaskCardObservationNoExtraToolCall()
+    {
+        var chat = new FakeChat();
+        var screener = new FlaggingScreener();
+        var (factory, client) = Build(services =>
+        {
+            services.AddSingleton<IChatClient>(chat);
+            services.AddSingleton(FakeApprovedManifest.Approved());
+            services.AddSingleton<ICopilotRecordScreener>(screener);
+        });
+        var store = factory.Services.GetRequiredService<ICaseStateStore>();
+        var scope = store.AuthorizeCase(CaseA, store.OwnerOf(CaseA)!);
+        var revision = store.Read(scope).Revision;
+        var ledger = factory.Services.GetRequiredService<ICopilotInvocationStore>();
+
+        foreach (var role in new[] { "technical-reviewer", "presenter" })
+        {
+            chat.Reset(index => index switch
+            {
+                0 => Calls(("t1", "read_source", ReadArgs("list", "maintenance"))),
+                1 => Calls(("t2", "advance_stage", $$"""{"caseId":"cp-case-a","expectedRevision":{{revision}}}""")),
+                _ => Final("Here are the open points."),
+            });
+            var before = (await ledger.ReadCaseAsync(CaseA, TestContext.Current.CancellationToken)).Count;
+            var reply = await Ask(Session(role, factory), Body("What are the open points on this aircraft?", note: Note), client);
+            Assert.Equal(HttpStatusCode.OK, reply.Status);
+            var rows = (await ledger.ReadCaseAsync(CaseA, TestContext.Current.CancellationToken)).Skip(before).Where(row => row.Operation != "question").ToArray();
+            Assert.Equal(["read_source", "read_source", "advance_stage", "advance_stage"], rows.Select(row => row.Operation));
+            Assert.DoesNotContain("screening", chat.Outbound(chat.Requests.Count - 1), StringComparison.Ordinal);
+            Assert.Equal(revision, store.Read(scope).Revision);
+            Assert.False(ReleaseEndpoints.IsReleased(store.Read(scope)));
+            if (role == "technical-reviewer")
+            {
+                Assert.Equal(3, chat.Requests.Count);
+                Assert.Equal(ToolError(403, "forbidden"), chat.Observations(2)[^1].ToJsonString());
+                Assert.Equal("""{"state":"detected","service":"prompt-shields","flaggedFields":["note"]}""", reply.Json["records"]![0]!["screening"]!.ToJsonString());
+                Assert.Equal(1, screener.Records);
+            }
+            else
+            {
+                Assert.Equal(ToolError(403, "forbidden"), chat.Observations(1).Single().ToJsonString());
+                Assert.Null(reply.Json["records"]?.AsArray().FirstOrDefault());
+                Assert.Equal(1, screener.Records);
+                // The presenter path stops at the existing confirmation proposal; nothing is released.
+                Assert.Equal(2, chat.Requests.Count);
+                Assert.True(Guid.TryParse((string?)reply.Json["confirmation"]!["proposalId"], out _));
+            }
+        }
+    }
+
     private sealed class FakeResponse(int status) : System.ClientModel.Primitives.PipelineResponse
     {
         public override int Status => status;
