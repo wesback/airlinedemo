@@ -17,11 +17,11 @@ public sealed class MaintenanceSource()
         SchemaVersion = SourceFixtureManifest.SupportedSchemaVersion,
         SourceFixtureVersion = SourceFixtureManifest.SupportedSourceFixtureVersion,
         ScenarioDate = "2026-10-01",
-        Sha256 = "87558838dada9a19406ed6ac5a0410e17f5f9818ef3435f1906a671a984e9a0f",
+        Sha256 = "ef84831569a14927211c3135637ad7230615bd3cc8cbfb3eec658bff2a26260b",
         RecordCounts = new Dictionary<string, int>
         {
             ["technical"] = 0,
-            ["maintenance"] = 6,
+            ["maintenance"] = 7,
             ["finance"] = 0,
             ["records"] = 0,
             ["contracts"] = 0,
