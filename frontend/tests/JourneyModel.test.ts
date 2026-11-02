@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { activityFrom, actorKind, deriveProgress, mergeTrail, waitingOn, type ActivityItem } from '../src/journey/model';
 import type { CopilotActivityItem } from '../src/journey/copilotApi';
-import type { AuditEvent, CaseHistory, CaseRecord } from '../src/journey/api';
+import type { ArrivalProjection, AuditEvent, CaseHistory, CaseRecord } from '../src/journey/api';
 import { aiBriefFor, aiChipFor } from '../src/journey/aiBriefs';
 
 const at = '2026-10-30T10:00:00Z';
@@ -16,11 +16,68 @@ const investigated = [
 
 describe('deriveProgress', () => {
   it('places a freshly arrived aircraft at records intake', () => {
-    const progress = deriveProgress(record([], false));
+    const progress = deriveProgress({ ...record([], false), caseId: 'case-002' });
     expect(progress.stepIndex).toBe(1);
     expect(progress.states.arrival).toBe('done');
     expect(progress.states.intake).toBe('current');
     expect(waitingOn(progress)).toEqual({ actor: 'rules', label: 'Waiting for the records package' });
+  });
+
+  it('keeps enrolled core case Arrived until server completion', () => {
+    const arrival: ArrivalProjection = {
+      contractVersion: 1, caseId: 'case-001', caseRevision: 2, state: 'collecting',
+      missingSources: ['technical', 'maintenance', 'finance', 'records', 'contracts'], canComplete: false,
+    };
+    const progress = deriveProgress({ ...record([], false), caseId: 'case-001', arrival });
+
+    expect(progress.stepIndex).toBe(0);
+    expect(progress.states.arrival).toBe('current');
+    expect(waitingOn(progress)).toEqual({ actor: 'rules', label: 'Arrived' });
+    expect(progress.missingSources).toEqual(['technical', 'maintenance', 'finance', 'records', 'contracts']);
+  });
+
+  it('completed arrival with source pins waits at intake without claiming investigation', () => {
+    const arrival: ArrivalProjection = {
+      contractVersion: 1, caseId: 'case-001', caseRevision: 5, state: 'ready', missingSources: [], canComplete: false,
+    };
+    const pinnedCase = { ...record([
+      event(1, 'arrival-journey-seeder', 'arrival.enrolled'),
+      event(2, 'presenter', 'arrival.started'),
+      event(3, 'reviewer', 'arrival.source_read', '{"contractVersion":1,"sourceId":"technical","role":"technical-reviewer","outcome":"success","recordRefs":[{"sourceId":"technical","recordId":"technical-1","recordVersion":3}]}'),
+      event(4, 'presenter', 'arrival.completed'),
+    ]), caseId: 'case-001', arrival };
+    const noPackage = deriveProgress(pinnedCase, { events: [] });
+
+    expect(noPackage.states.arrival).toBe('done');
+    expect(noPackage.states.intake).toBe('current');
+    expect(noPackage.states.investigation).toBe('upcoming');
+    expect(noPackage.stepIndex).toBe(1);
+
+    const auditOnly = deriveProgress({
+      ...pinnedCase,
+      audit: [
+        ...pinnedCase.audit,
+        event(5, 'intake', 'journey', 'Records package received.'),
+        event(6, 'records-agent', 'journey', 'Investigation completed.'),
+      ],
+    }, null);
+    expect(auditOnly.states.intake).toBe('current');
+    expect(auditOnly.states.investigation).toBe('upcoming');
+
+    const packageReceived: CaseHistory = { events: [{
+      eventId: 'package-1-received', sequence: 1, eventType: 'package-received', actorRole: 'intake',
+      summary: 'Package received.', capabilityLabel: 'Rules-based', witnesses: [],
+    }] };
+    const waitingForAgent = deriveProgress(pinnedCase, packageReceived);
+    expect(waitingForAgent.states.intake).toBe('done');
+    expect(waitingForAgent.states.investigation).toBe('current');
+
+    const agentCompleted = deriveProgress(pinnedCase, { events: [...packageReceived.events, {
+      eventId: 'package-1-agent', sequence: 2, eventType: 'evidence-reviewed', actorRole: 'records-agent',
+      summary: 'Records agent reviewed the package.', capabilityLabel: 'AI agent', witnesses: [],
+    }] });
+    expect(agentCompleted.states.investigation).toBe('done');
+    expect(agentCompleted.states.technical).toBe('current');
   });
 
   it('waits for the technical reviewer once the AI agent has raised findings', () => {
@@ -85,6 +142,26 @@ describe('activity', () => {
     expect(items).toHaveLength(4);
     expect(items[0]).toMatchObject({ actor: 'human', who: 'Technical reviewer', what: 'Technical review accepted the findings', reason: 'Verified.' });
     expect(items[3]).toMatchObject({ actor: 'rules', who: 'Intake service' });
+  });
+
+  it('formats source activity without inventing denied record identities', () => {
+    const items = activityFrom([
+      event(1, 'reviewer', 'arrival.source_read',
+        '{"contractVersion":1,"sourceId":"technical","role":"technical-reviewer","outcome":"success","recordRefs":[{"sourceId":"technical","recordId":"eng-001","recordVersion":3}]}'),
+      event(2, 'presenter', 'arrival.source_read',
+        '{"contractVersion":1,"sourceId":"contracts","role":"presenter","outcome":"denied","errorCode":"forbidden"}'),
+    ]);
+
+    expect(items[0]).toMatchObject({
+      what: 'contracts source read: denied',
+      sourceRead: { sourceId: 'contracts', role: 'presenter', outcome: 'denied', errorCode: 'forbidden', recordRefs: [] },
+    });
+    expect(JSON.stringify(items[0])).not.toContain('eng-001');
+    expect(items[1]).toMatchObject({
+      what: 'technical source read: success',
+      sourceRead: { sourceId: 'technical', role: 'technical-reviewer', outcome: 'success',
+        recordRefs: [{ sourceId: 'technical', recordId: 'eng-001', recordVersion: 3 }] },
+    });
   });
 });
 

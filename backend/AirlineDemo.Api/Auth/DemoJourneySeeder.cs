@@ -58,6 +58,7 @@ public static class DemoJourneySeeder
     {
         const string caseId = "case-001";
         if (!bool.TryParse(configuration["Demo:SeedJourney"], out var enabled) || !enabled
+            || (bool.TryParse(configuration["Demo:ArrivalJourney"], out var arrivalEnabled) && arrivalEnabled)
             || store.OwnerOf(caseId) != Owner) return;
         var scope = store.AuthorizeCase(caseId, Owner);
         if (store.Read(scope).Revision != 0) return;

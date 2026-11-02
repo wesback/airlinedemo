@@ -174,6 +174,25 @@ public static class EvidenceIntake
         var content = JsonSerializer.Serialize(new SourceBasisSnapshot(SourceBasisFormat, pins), SourceRecordJsonOptions);
         return new GatheredSourceBasis(readOnlyPins, content);
     }
+
+    internal static IReadOnlyList<SourceBasisPin> CreateSourcePins<TPayload>(
+        string expectedSourceId, string caseId, IReadOnlyList<SourceRecord<TPayload>> records)
+        where TPayload : class =>
+        CreatePins(expectedSourceId, caseId, records).ToArray();
+
+    internal static IReadOnlyList<SourceBasisPin> ReadSourceBasisPins(string content)
+    {
+        try
+        {
+            var snapshot = JsonSerializer.Deserialize<SourceBasisSnapshot>(content, SourceRecordJsonOptions);
+            return snapshot?.Format == SourceBasisFormat ? snapshot.Pins ?? [] : [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
     private static async Task<IReadOnlyList<SourceRecord<TPayload>>> ReadAsync<TPayload>(
         ISourceSystem<TPayload> source,
         string caseId,

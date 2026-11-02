@@ -1,6 +1,8 @@
+using System.Text.Json;
 using AirlineDemo.Api.Dashboard;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
+using AirlineDemo.Api.SourceSystems;
 
 namespace AirlineDemo.Api.Evidence;
 
@@ -28,7 +30,8 @@ public static class IntakeJourneyHandover
         Commit(store, scope, eventId, state =>
         {
             var version = state.Basis.Count + 1;
-            var basis = CaseStateStore.CreateBasisVersion(version, $"Records package {record.PackageId}",
+            var basisContent = IntakeBasisContent(state, record.PackageId);
+            var basis = CaseStateStore.CreateBasisVersion(version, basisContent,
                 state.Basis.Count == 0 ? string.Empty : state.Basis[^1].BasisDigest);
             var rejected = record.Documents.Count - accepted.Count;
             var summary = $"Records package received: {accepted.Count} document{(accepted.Count == 1 ? "" : "s")} parsed and pinned as evidence basis version {version}" +
@@ -88,6 +91,33 @@ public static class IntakeJourneyHandover
 
     private static List<EvidenceDocumentResult> Accepted(EvidencePackageRecord record) =>
         record.Documents.Where(d => d.Status == "accepted" && d.Version is not null).ToList();
+
+    private static string IntakeBasisContent(CaseState state, string packageId)
+    {
+        var completion = state.Audit.FirstOrDefault(item => item.Action == ArrivalJourneyService.CompletionAction);
+        if (completion is null) return $"Records package {packageId}";
+
+        ArrivalCompletionAuditDetail? detail;
+        try
+        {
+            detail = JsonSerializer.Deserialize<ArrivalCompletionAuditDetail>(completion.Detail,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("The completed arrival snapshot could not be read.", exception);
+        }
+
+        if (detail?.Receipt is not { State: "ready" } receipt || receipt.CaseId != state.CaseId)
+            throw new InvalidDataException("The completed arrival snapshot is invalid.");
+        var frozenBasis = state.Basis.SingleOrDefault(item => item.Version == detail.BasisVersion);
+        if (frozenBasis is null || frozenBasis.BasisDigest != detail.BasisDigest)
+            throw new InvalidDataException("The completed arrival basis no longer matches its receipt.");
+        var pins = EvidenceIntake.ReadSourceBasisPins(frozenBasis.Content);
+        if (pins.Count == 0 || SourceModes.Sources.Any(source => !pins.Any(pin => pin.SourceId == source)))
+            throw new InvalidDataException("The completed arrival basis does not contain every source pin.");
+        return EvidenceIntake.CreateSourceBasis(pins).Content;
+    }
 
     private static void Commit(ICaseStateStore store, CaseScope scope, string eventId, Func<CaseState, CaseCommit> build)
     {

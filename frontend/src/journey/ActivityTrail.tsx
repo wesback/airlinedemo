@@ -53,6 +53,13 @@ export default function ActivityTrail({ business, copilot }: Props) {
                 <p>{entry.item.what}</p>
                 {entry.item.reason && <p className="av-activity-reason">{entry.item.reason}</p>}
                 <p className="av-activity-meta">{entry.item.who}, {formatWhen(entry.item.at)}</p>
+                {entry.item.sourceRead && <dl className="av-activity-detail" aria-label="Source read details">
+                  <dt>Source</dt><dd>{entry.item.sourceRead.sourceId}</dd>
+                  <dt>Role</dt><dd>{entry.item.sourceRead.role}</dd>
+                  <dt>Outcome</dt><dd>{entry.item.sourceRead.outcome}{entry.item.sourceRead.errorCode ? ` (${entry.item.sourceRead.errorCode})` : ''}</dd>
+                  <dt>Records</dt><dd>{entry.item.sourceRead.recordRefs.length === 0 ? 'None'
+                    : entry.item.sourceRead.recordRefs.map((ref) => `${ref.sourceId} ${ref.recordId} v${ref.recordVersion}`).join(', ')}</dd>
+                </dl>}
               </div>
             </li>
             : <li key={entry.key} className="av-activity-ai av-activity-copilot">

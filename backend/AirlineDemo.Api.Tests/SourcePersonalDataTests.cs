@@ -67,6 +67,8 @@ public sealed class SourcePersonalDataTests
         builder.Services.AddSingleton<ISourceReadAdmissionStore, InMemorySourceReadAdmissionStore>();
         builder.Services.AddSingleton<SourceModeStore>();
         builder.Services.AddSingleton<SourceReadBudget>();
+        builder.Services.AddSingleton<GovernedSourceReader>();
+        builder.Services.AddSingleton<ArrivalJourneyService>();
         builder.Services.AddSingleton<ISourceSystem<RecordsPayload>, RecordsSource>();
 
         await using var app = builder.Build();

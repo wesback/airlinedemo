@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using AirlineDemo.Api.Diagnostics;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.Reviews;
+using AirlineDemo.Api.SourceSystems;
 
 namespace AirlineDemo.Api.Auth;
 
@@ -19,7 +20,8 @@ public static class CaseEndpoints
         return app;
     }
 
-    private static IResult GetCase(string caseId, HttpContext http, DemoSessionStore sessions, ICaseStateStore cases, IConfiguration config, ILogger<DemoSessionStore> logger)
+    private static IResult GetCase(string caseId, HttpContext http, DemoSessionStore sessions, ICaseStateStore cases,
+        ArrivalJourneyService arrival, IConfiguration config, ILogger<DemoSessionStore> logger)
     {
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (session is null)
@@ -35,7 +37,10 @@ public static class CaseEndpoints
             return Results.NotFound();
         }
 
-        return Results.Ok(cases.Read(scope));
+        var state = cases.Read(scope);
+        if (!arrival.IsEnrolled(state)) return Results.Ok(state);
+
+        return Results.Json(ArrivalCaseProjection.Create(state, session.User.Role, arrival.Status(state)));
     }
 
     private static void EmitScopeFailure(ILogger<DemoSessionStore> logger, IConfiguration config) =>

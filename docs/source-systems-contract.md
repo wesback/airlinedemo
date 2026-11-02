@@ -234,7 +234,9 @@ source.
 
 Gathered source basis content is JSON with `format: "source-record-pins-v1"` and a non-empty `pins` array. Each pin has the exact `sourceId`, `recordId`, `recordVersion` tuple, a complete source-record envelope in `content`, and `contentDigest` (lowercase SHA-256 of the UTF-8 content). Envelope JSON is compact; object properties are recursively sorted ordinally and array order is preserved. Pins are sorted by source ID, record ID, then numeric version. The store rejects empty, malformed or duplicate pins and verifies the envelope tuple and digest.
 
-Identical gathered inputs do not append a version. Changed record content or version appends a later `BasisVersion` through `ICaseStateStore.Commit(scope, expectedRevision, ...)`, which validates pins and the append-only digest chain under the store lock. Earlier content and digests are never rewritten. A stale revision rejects the whole commit without adding a basis or audit event.
+Legacy evidence gathering is unchanged: identical gathered inputs do not append a version; changed record content or version appends a later `BasisVersion`. For an enrolled arrival, each successful non-empty source retrieval appends one new basis version that merges the retrieved source pins with pins from the preceding version. An exact replay of that retrieval command returns its original receipt without another source read, audit event or basis append. Empty, stale, conflicting or unavailable reads do not add pins.
+
+Every append uses `ICaseStateStore.Commit(scope, expectedRevision, ...)`, which validates pins and the append-only digest chain under the store lock. Earlier content and digests are never rewritten. A stale revision rejects the whole commit without adding a basis or audit event.
 
 ## Decision dossier export
 
