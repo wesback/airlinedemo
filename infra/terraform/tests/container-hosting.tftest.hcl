@@ -125,11 +125,13 @@ run "private_dependency_references" {
       local.private_endpoints.model.subresource == "account" && local.private_endpoints.model.zone == "model" &&
       local.private_endpoints.kv.subresource == "vault" && local.private_endpoints.kv.zone == "kv" &&
       local.private_endpoints.acr.subresource == "registry" && local.private_endpoints.acr.zone == "acr" &&
+      local.private_endpoints.contentsafety.subresource == "account" && local.private_endpoints.contentsafety.zone == "contentsafety" &&
       can(regex("(?s)sql\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id", file("main.tf"))) &&
       can(regex("(?s)blob\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_storage_account\\.blob\\.id", file("main.tf"))) &&
       can(regex("(?s)model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id", file("main.tf"))) &&
       can(regex("(?s)kv\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_key_vault\\.kv\\.id", file("main.tf"))) &&
-      can(regex("(?s)acr\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_container_registry\\.acr\\.id", file("main.tf")))
+      can(regex("(?s)acr\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_container_registry\\.acr\\.id", file("main.tf"))) &&
+      can(regex("(?s)contentsafety\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.content_safety\\.id", file("main.tf")))
     )
     error_message = "Each private endpoint must target its configured resource, subresource, and DNS zone."
   }
@@ -141,6 +143,8 @@ run "private_dependency_references" {
         model = "privatelink.openai.azure.com"
         kv    = "privatelink.vaultcore.azure.net"
         acr   = "privatelink.azurecr.io"
+
+        contentsafety = "privatelink.cognitiveservices.azure.com"
       } &&
       azurerm_private_dns_zone.demo["sql"].name == "privatelink.database.windows.net" &&
       azurerm_private_dns_zone.demo["blob"].name == "privatelink.blob.core.windows.net" &&
@@ -157,6 +161,9 @@ run "private_dependency_references" {
       azurerm_private_dns_zone_virtual_network_link.demo["model"].private_dns_zone_name == "privatelink.openai.azure.com" &&
       azurerm_private_dns_zone_virtual_network_link.demo["kv"].private_dns_zone_name == "privatelink.vaultcore.azure.net" &&
       azurerm_private_dns_zone_virtual_network_link.demo["acr"].private_dns_zone_name == "privatelink.azurecr.io" &&
+      azurerm_private_dns_zone.demo["contentsafety"].name == "privatelink.cognitiveservices.azure.com" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["contentsafety"].name == "link-contentsafety" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["contentsafety"].private_dns_zone_name == "privatelink.cognitiveservices.azure.com" &&
       can(regex("(?s)private_dns_zone_group \\{\\s*name\\s*=\\s*\"dzg-\\$\\{each\\.key\\}\"\\s*private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
     )
     error_message = "Every private endpoint must reference the DNS zone configured for its dependency."
@@ -203,9 +210,65 @@ run "empty_image_digest" {
 run "demo_passcode_secret_is_referenced" {
   command = plan
 
+  # Both secret references name the app identity; a known ID keeps the two set elements distinct during plan.
+  override_resource {
+    target          = azurerm_user_assigned_identity.app
+    override_during = plan
+    values = {
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app"
+      principal_id = "55555555-5555-5555-5555-555555555555"
+      client_id    = "66666666-6666-6666-6666-666666666666"
+    }
+  }
+
   assert {
-    condition     = length([for secret in azurerm_container_app.app[0].secret : secret if secret.name == "demo-passcode" && secret.key_vault_secret_id == "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"]) == 1 && length(azurerm_container_app.app[0].secret) == 1
+    condition     = length([for secret in azurerm_container_app.app[0].secret : secret if secret.name == "demo-passcode" && secret.key_vault_secret_id == "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"]) == 1 && length(azurerm_container_app.app[0].secret) == 2
     error_message = "The Container App must reference the configured demo passcode Key Vault secret."
+  }
+}
+
+run "copilot_audit_key_is_a_key_vault_reference" {
+  command = plan
+
+  # Both secret references name the app identity; a known ID keeps the two set elements distinct during plan.
+  override_resource {
+    target          = azurerm_user_assigned_identity.app
+    override_during = plan
+    values = {
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app"
+      principal_id = "55555555-5555-5555-5555-555555555555"
+      client_id    = "66666666-6666-6666-6666-666666666666"
+    }
+  }
+
+  assert {
+    condition     = random_bytes.copilot_audit_key.length == 32 && azurerm_key_vault_secret.copilot_audit_key.name == "copilot-audit-key" && can(regex("value\\s*=\\s*random_bytes\\.copilot_audit_key\\.base64", file("container-hosting.tf")))
+    error_message = "The audit key must be a 32-byte Terraform-generated value stored as the copilot-audit-key vault secret."
+  }
+  assert {
+    condition     = one([for secret in azurerm_container_app.app[0].secret : secret if secret.name == "copilot-audit-key"]).key_vault_secret_id == "https://kv-demo-test.vault.azure.net/secrets/copilot-audit-key" && one([for secret in azurerm_container_app.app[0].secret : secret if secret.name == "copilot-audit-key"]).value == null
+    error_message = "The Container App must hold the audit key only as a Key Vault secret reference, never as a plain value."
+  }
+  assert {
+    condition     = one([for e in azurerm_container_app.app[0].template[0].container[0].env : e if e.name == "Copilot__AuditKey"]).secret_name == "copilot-audit-key" && one([for e in azurerm_container_app.app[0].template[0].container[0].env : e if e.name == "Copilot__AuditKey"]).value == null
+    error_message = "Copilot__AuditKey must come from the copilot-audit-key secret reference, not a plain-text value."
+  }
+  assert {
+    condition     = azurerm_role_assignment.app_copilot_audit_key.role_definition_name == "Key Vault Secrets User" && azurerm_role_assignment.app_copilot_audit_key.principal_id == "55555555-5555-5555-5555-555555555555" && can(regex("scope\\s*=\\s*\"\\$\\{azurerm_key_vault\\.kv\\.id\\}/secrets/\\$\\{local\\.copilot_audit_key_secret_name\\}\"", file("container-hosting.tf")))
+    error_message = "The app identity may read only the audit key secret."
+  }
+}
+
+run "app_calls_content_safety_through_the_gateway" {
+  command = plan
+
+  variables {
+    gateway_endpoint = "https://apim-demo.azure-api.net/"
+  }
+
+  assert {
+    condition     = [for e in azurerm_container_app.app[0].template[0].container[0].env : e.value if e.name == "ContentSafety__Endpoint"] == ["https://apim-demo.azure-api.net/contentsafety"]
+    error_message = "ContentSafety__Endpoint must be the gateway's contentsafety API base URL."
   }
 }
 

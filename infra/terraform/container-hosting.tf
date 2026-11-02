@@ -26,6 +26,39 @@ resource "azurerm_role_assignment" "app_passcode_secret" {
   principal_type       = "ServicePrincipal"
 }
 
+# Stable key for the copilot audit records. Terraform generates it once and stores it only in the vault;
+# the app reads it through a Key Vault secret reference, and the value is never output.
+locals {
+  copilot_audit_key_secret_name = "copilot-audit-key"
+}
+
+resource "random_bytes" "copilot_audit_key" {
+  length = 32
+}
+
+resource "azurerm_key_vault_secret" "copilot_audit_key" {
+  name         = local.copilot_audit_key_secret_name
+  key_vault_id = azurerm_key_vault.kv.id
+  value        = random_bytes.copilot_audit_key.base64
+  content_type = "Copilot audit key (base64, 32 bytes)"
+
+  depends_on = [
+    azurerm_role_assignment.terraform_kv_secrets,
+    azurerm_private_endpoint.demo,
+    azurerm_private_dns_zone_virtual_network_link.demo,
+    azurerm_network_security_perimeter_association.key_vault,
+  ]
+}
+
+resource "azurerm_role_assignment" "app_copilot_audit_key" {
+  scope                = "${azurerm_key_vault.kv.id}/secrets/${local.copilot_audit_key_secret_name}"
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.app.principal_id
+  principal_type       = "ServicePrincipal"
+
+  depends_on = [azurerm_key_vault_secret.copilot_audit_key]
+}
+
 # A workload-profiles environment: the delegated app subnet and its NSG only support this environment type.
 resource "azurerm_container_app_environment" "demo" {
   name                           = local.container_apps_environment_name
@@ -69,6 +102,12 @@ resource "azurerm_container_app" "app" {
   secret {
     name                = "demo-passcode"
     key_vault_secret_id = var.demo_passcode_secret_uri
+    identity            = azurerm_user_assigned_identity.app.id
+  }
+
+  secret {
+    name                = "copilot-audit-key"
+    key_vault_secret_id = "${local.key_vault_data_plane}/secrets/${local.copilot_audit_key_secret_name}"
     identity            = azurerm_user_assigned_identity.app.id
   }
 
@@ -156,6 +195,12 @@ resource "azurerm_container_app" "app" {
         value = var.model_version
       }
 
+      # Prompt Shields through the gateway's contentsafety API, with the same token as the model gateway.
+      env {
+        name  = "ContentSafety__Endpoint"
+        value = local.content_safety_endpoint
+      }
+
       env {
         name  = "Demo__SeedCases"
         value = "true"
@@ -176,6 +221,11 @@ resource "azurerm_container_app" "app" {
         name        = "Demo__Passcode"
         secret_name = "demo-passcode"
       }
+
+      env {
+        name        = "Copilot__AuditKey"
+        secret_name = "copilot-audit-key"
+      }
     }
   }
 
@@ -188,6 +238,7 @@ resource "azurerm_container_app" "app" {
   depends_on = [
     azurerm_role_assignment.app_acr_pull,
     azurerm_role_assignment.app_passcode_secret,
+    azurerm_role_assignment.app_copilot_audit_key,
     azurerm_private_endpoint.demo,
     azurerm_private_dns_zone_virtual_network_link.demo,
   ]
