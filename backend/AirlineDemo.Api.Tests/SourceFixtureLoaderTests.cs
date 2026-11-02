@@ -318,6 +318,7 @@ public sealed class SourceFixtureLoaderTests
             ["records"] = RecordsSource.CoreManifest,
             ["contracts"] = ContractsSource.CoreManifest,
         };
+        var counts = Sources.ToDictionary(source => source, source => CommittedRecords(source).Count);
 
         foreach (var source in Sources)
         {
@@ -330,6 +331,10 @@ public sealed class SourceFixtureLoaderTests
 
             using var sidecar = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(CommittedSources(), $"{source}.manifest.json")));
             AssertManifestMetadata(sidecar.RootElement, source, digest, recordCount);
+            foreach (var (countSource, expectedCount) in counts)
+            {
+                Assert.Equal(expectedCount, sidecar.RootElement.GetProperty("recordCounts").GetProperty(countSource).GetInt32());
+            }
         }
     }
 
