@@ -600,11 +600,21 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
         Assert.All(retained.Take(7), call => Assert.Empty(call.Arguments!));
         Assert.Equal(baseline, _sources.Calls);
         Assert.Equal(revision, Revision());
+        // FR-032 (updated in this story): each refused call is one ledger invocation against the selected case only.
+        var ledger = _factory.Services.GetRequiredService<ICopilotInvocationStore>();
+        var refused = (await ledger.ReadCaseAsync("cp-case-a", TestContext.Current.CancellationToken))
+            .Where(row => row.Phase == "outcome" && row.ResultCode is "unknown_tool" or "selected_case_mismatch")
+            .Select(row => (row.Operation, row.Provenance, row.HttpStatus!.Value, row.ResultCode!)).ToArray();
+        Assert.Equal([("unknown_tool", "copilot-client", 400, "unknown_tool"), ("get_open_points", "copilot-client", 403, "selected_case_mismatch"),
+            ("read_source", "copilot-client", 403, "selected_case_mismatch")], refused);
+        Assert.Empty(await ledger.ReadCaseAsync("cp-case-b", TestContext.Current.CancellationToken));
 
         _chat.Reset(index => index == 0 ? Calls(("n1", "get_case_summary", Args()), ("n2", "list_my_cases", "{}")) : Final("Done."));
         Assert.Equal(HttpStatusCode.OK, (await Ask(reviewer, Body("No case selected.", caseId: null))).Status);
         var observed = _chat.Observations(1);
         Assert.Equal(ToolError(409, "case_selection_required"), observed[0].ToJsonString());
+        var unselected = ((InMemoryCopilotInvocationStore)ledger).Records.Single(row => row.Phase == "outcome" && row.ResultCode == "case_selection_required");
+        Assert.Equal(("get_case_summary", null, 409), (unselected.Operation, unselected.AuthorizedCaseRef, unselected.HttpStatus!.Value));
         Assert.Equal(200, (int)observed[1]["httpStatus"]!);
         Assert.Equal(2, observed[1]["result"]!["cases"]!.AsArray().Count);
 

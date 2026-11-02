@@ -190,7 +190,7 @@ public static class CopilotMcp
             "advance_stage" => Task.FromResult(AdvanceStage(args, session, http, admission)),
             "get_case_summary" => Task.FromResult(FromHttp(CopilotProjectionEndpoints.ToResult(projections.Summary(session, args.CaseId!)), http)),
             "get_open_points" => Task.FromResult(FromHttp(CopilotProjectionEndpoints.ToResult(projections.OpenPoints(session, args.CaseId!)), http)),
-            _ => ReadSource(args, http, cancellationToken),
+            _ => ReadSource(args, http, admission, cancellationToken),
         };
     }
 
@@ -234,7 +234,8 @@ public static class CopilotMcp
         return Succeed(new JsonObject { ["contractVersion"] = CopilotProjections.ContractVersion, ["cases"] = listed });
     }
 
-    private static async Task<CopilotInvocationResult> ReadSource(ToolArgs args, HttpContext http, CancellationToken cancellationToken)
+    private static async Task<CopilotInvocationResult> ReadSource(ToolArgs args, HttpContext http, CopilotAdmission admission,
+        CancellationToken cancellationToken)
     {
         var services = http.RequestServices;
         var sessions = services.GetRequiredService<DemoSessionStore>();
@@ -254,6 +255,7 @@ public static class CopilotMcp
         var verdicts = await services.GetRequiredService<ICopilotRecordScreener>().ScreenAsync(
             [.. records.Select(ScreeningInput)], ScreeningScope.For(http), cancellationToken);
         for (var i = 0; i < records.Length; i++) records[i]["screening"] = verdicts[i].ToJson();
+        if (await AppendReadDetails(services, admission, records, verdicts, cancellationToken) is { } refused) return Fail(refused.Status, refused.Code);
         var refs = new JsonArray([.. records.Select(record => new JsonObject
         {
             ["sourceId"] = (string?)record["sourceId"], ["recordId"] = (string?)record["recordId"], ["recordVersion"] = (int?)record["recordVersion"],
@@ -265,6 +267,34 @@ public static class CopilotMcp
             ["caseId"] = args.CaseId, ["sourceId"] = args.SourceId, ["outcome"] = "ok", ["refs"] = refs,
         };
         return read with { Result = success with { Untrusted = true } };
+    }
+
+    // One record_read row per returned record, one injection_detected row per flagged record and one
+    // screening_unavailable row when any verdict is unavailable; identities and codes only, never record text. A record
+    // identity that is not identifier-shaped is a source contract violation and withholds the read.
+    private static async Task<(int Status, string Code)?> AppendReadDetails(IServiceProvider services, CopilotAdmission admission, JsonNode[] records,
+        IReadOnlyList<ScreeningVerdict> verdicts, CancellationToken cancellationToken)
+    {
+        var at = services.GetRequiredService<TimeProvider>().GetUtcNow();
+        var details = new List<CopilotInvocationDetail>();
+        for (var i = 0; i < records.Length; i++)
+        {
+            var (sourceId, recordId, version) = ((string?)records[i]["sourceId"], (string?)records[i]["recordId"], (int?)records[i]["recordVersion"]);
+            details.Add(new(admission.InvocationId, "record_read", at, sourceId, recordId, version, verdicts[i].State, verdicts[i].FlaggedFields));
+            if (verdicts[i].State == ScreeningVerdict.Detected)
+                details.Add(new(admission.InvocationId, "injection_detected", at, sourceId, recordId, version, verdicts[i].State, verdicts[i].FlaggedFields));
+        }
+        if (verdicts.Any(verdict => verdict.State == ScreeningVerdict.UnavailableState))
+            details.Add(new(admission.InvocationId, "screening_unavailable", at, ScreeningState: ScreeningVerdict.UnavailableState));
+        try { details.ForEach(CopilotInvocationDetails.Validate); }
+        catch (ArgumentOutOfRangeException) { return (StatusCodes.Status502BadGateway, "copilot_context_invalid"); }
+        try { await services.GetRequiredService<ICopilotInvocationDetailStore>().AppendAsync(details, cancellationToken); }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            services.GetRequiredService<ILogger<CopilotInvocationDetail>>().LogError("Copilot read details could not be recorded; the read result was withheld.");
+            return (StatusCodes.Status503ServiceUnavailable, "audit_unavailable");
+        }
+        return null;
     }
 
     // The string fields of a typed payload ({"fields":{...}}), or of the payload itself when it is flat.
