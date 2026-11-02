@@ -194,7 +194,7 @@ resource "azurerm_private_endpoint" "monitor" {
     name = "dzg-monitor"
     private_dns_zone_ids = concat(
       [for k in sort(keys(local.monitor_private_dns_zones)) : azurerm_private_dns_zone.monitor[k].id],
-      [azurerm_private_dns_zone.demo["blob"].id],
+      [local.blob_dns_zone_id],
     )
   }
 

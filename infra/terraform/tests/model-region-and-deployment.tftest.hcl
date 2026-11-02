@@ -161,12 +161,12 @@ run "model_endpoint_remains_private_and_keyless" {
   }
 
   assert {
-    condition     = azurerm_private_dns_zone.demo["model"].name == "privatelink.openai.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["model"].private_dns_zone_name == "privatelink.openai.azure.com" && can(regex("(?s)resource \"azurerm_private_dns_zone_virtual_network_link\" \"demo\" \\{.*private_dns_zone_name\\s*=\\s*azurerm_private_dns_zone\\.demo\\[each\\.key\\]\\.name.*virtual_network_id\\s*=\\s*azurerm_virtual_network\\.demo\\.id", file("main.tf")))
+    condition     = azurerm_private_dns_zone.demo["model"].name == "privatelink.openai.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["model"].private_dns_zone_name == "privatelink.openai.azure.com" && can(regex("(?s)resource \"azurerm_private_dns_zone_virtual_network_link\" \"demo\" \\{.*private_dns_zone_name\\s*=\\s*each\\.value.*virtual_network_id\\s*=\\s*azurerm_virtual_network\\.demo\\.id", file("main.tf")))
     error_message = "The model privatelink.openai.azure.com zone must be linked to the demo VNet."
   }
 
   assert {
-    condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && length(azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].private_dns_zone_ids) == 1 && can(regex("(?s)private_dns_zone_group \\{\\s*name\\s*=\\s*\"dzg-[^\"]*\"\\s*private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf"))) && can(regex("zone\\s*=\\s*\"model\"\\s*\\}", file("main.tf")))
+    condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && length(azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].private_dns_zone_ids) == 1 && can(regex("private_dns_zone_ids\\s*=\\s*\\[each\\.value\\.zone == \"blob\" \\? local\\.blob_dns_zone_id : azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf"))) && can(regex("zone\\s*=\\s*\"model\"\\s*\\}", file("main.tf")))
     error_message = "The model private endpoint must register in its DNS zone group with exactly one private DNS zone."
   }
 }
@@ -181,7 +181,7 @@ run "model_endpoint_dns_zone_group_targets_model_zone" {
   }
 
   assert {
-    condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && can(regex("(?s)private_dns_zone_group \\{\\s*name\\s*=\\s*\"dzg-\\$\\{each\\.key\\}\"\\s*private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
+    condition     = azurerm_private_endpoint.demo["model"].private_dns_zone_group[0].name == "dzg-model" && can(regex("private_dns_zone_ids\\s*=\\s*\\[each\\.value\\.zone == \"blob\" \\? local\\.blob_dns_zone_id : azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
     error_message = "Each private endpoint's DNS zone group must resolve its own zone key (each.value.zone) to the matching private DNS zone."
   }
 }

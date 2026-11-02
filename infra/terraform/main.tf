@@ -29,7 +29,16 @@ provider "azurerm" {
   tenant_id       = var.tenant_id
   # Storage has shared keys disabled, so container management must use Entra auth.
   storage_use_azuread = true
-  features {}
+  features {
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
+    key_vault {
+      purge_soft_delete_on_destroy               = false
+      purge_soft_deleted_certificates_on_destroy = false
+      purge_soft_deleted_secrets_on_destroy      = false
+    }
+  }
 }
 
 provider "azuread" {
@@ -386,8 +395,7 @@ resource "azurerm_key_vault" "kv" {
   rbac_authorization_enabled = true
   purge_protection_enabled   = true
   soft_delete_retention_days = 90
-  # Public access stays disabled (managed-tenant policy forces it); deployer_ip_cidrs are admitted through the
-  # network security perimeter below, so a Terraform runner outside the VNet can create the signing certificate.
+  # Data-plane provisioning runs through private endpoints, including recovery.
   public_network_access_enabled = false
 
   network_acls {
@@ -397,7 +405,7 @@ resource "azurerm_key_vault" "kv" {
   }
 }
 
-# Enforced perimeter: with publicNetworkAccess Disabled, only these inbound rules (and private endpoints) reach the vault.
+# Optional defense-in-depth perimeter; it does not replace private endpoint connectivity.
 resource "azurerm_network_security_perimeter" "deployer" {
   count               = length(var.deployer_ip_cidrs) > 0 ? 1 : 0
   name                = "nsp-${local.name_prefix}-${local.name_suffix}"
@@ -738,7 +746,7 @@ resource "azurerm_cognitive_deployment" "evaluation" {
 }
 
 resource "azurerm_private_dns_zone" "demo" {
-  for_each            = local.private_dns_zones
+  for_each            = { for k, v in local.private_dns_zones : k => v if k != "blob" || var.deployment_executor == null }
   name                = each.value
   resource_group_name = azurerm_resource_group.demo.name
 }
@@ -746,9 +754,10 @@ resource "azurerm_private_dns_zone" "demo" {
 resource "azurerm_private_dns_zone_virtual_network_link" "demo" {
   for_each              = local.private_dns_zones
   name                  = "link-${each.key}"
-  resource_group_name   = azurerm_resource_group.demo.name
-  private_dns_zone_name = azurerm_private_dns_zone.demo[each.key].name
+  resource_group_name   = each.key == "blob" && var.deployment_executor != null ? split("/", var.deployment_executor.blob_dns_zone_id)[4] : azurerm_resource_group.demo.name
+  private_dns_zone_name = each.value
   virtual_network_id    = azurerm_virtual_network.demo.id
+  depends_on            = [azurerm_private_dns_zone.demo]
 }
 
 resource "azurerm_private_endpoint" "demo" {
@@ -767,7 +776,7 @@ resource "azurerm_private_endpoint" "demo" {
 
   private_dns_zone_group {
     name                 = "dzg-${each.key}"
-    private_dns_zone_ids = [azurerm_private_dns_zone.demo[each.value.zone].id]
+    private_dns_zone_ids = [each.value.zone == "blob" ? local.blob_dns_zone_id : azurerm_private_dns_zone.demo[each.value.zone].id]
   }
 }
 

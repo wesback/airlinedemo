@@ -5,11 +5,23 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+for argument in "$@"; do
+  case "$argument" in
+    --tenant-id|--subscription-id)
+      exec python3 "$SCRIPT_DIR/deploy-private.py" "$@"
+      ;;
+  esac
+done
 REPOSITORY_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 MODEL_MANIFEST_FILE=${AIRLINEDEMO_MODEL_MANIFEST_FILE:-"$REPOSITORY_ROOT/config/model-manifest.json"}
 
 usage() {
   cat <<'USAGE'
+Private end-to-end deployment (recommended):
+  scripts/deploy.sh --tenant-id <id> --subscription-id <id> [--prefix demo1] [--stage all]
+  See docs/deployment.md for sign-in, protected release approval, resume and teardown.
+
+Legacy platform-only deployment (requires private data-plane connectivity):
 Usage: scripts/deploy.sh \
          [--image-digest sha256:<hex> --passcode-secret-uri <uri>] [options]
 
@@ -27,8 +39,7 @@ Application (second phase; give both or neither):
 Options:
   --presenter-cidrs <a,b>       presenter/reviewer CIDRs (default: none, which denies all ingress)
   --allow-my-ip                 add this machine's public address, looked up from api.ipify.org
-  --vault-allow-my-ip           let this machine reach the Key Vault data plane (needed to create the signing
-                                certificate when Terraform runs outside the VNet); the vault stays deny-by-default
+  --vault-allow-my-ip           legacy perimeter source-IP metadata; does not override disabled public access
   --build-runner <owner/repo>   create the self-hosted runner VM (label private-acr) registered with this repository;
                                 after the first run, store a GitHub token in the vault secret github-runner-token
   --runner-ssh-key <file>       runner admin public key (default: ~/.ssh/id_ed25519.pub, or a key created
@@ -183,7 +194,7 @@ else
 fi
 
 my_ip=
-# The state backend created here is reached through a network security perimeter that admits this machine.
+# Legacy perimeter source-IP rules do not replace private connectivity to a disabled public endpoint.
 if [ "$ALLOW_IP" = true ] || [ "$VAULT_IP" = true ] || { [ "$PREPARE_ONLY" = false ] && [ -z "$EXISTING" ]; }; then
   my_ip=${DEPLOY_PUBLIC_IP:-$(curl -fsS --max-time 10 https://api.ipify.org)} || fail "could not look up the public address; use --presenter-cidrs"
   [[ $my_ip =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || fail "unexpected answer from the address lookup"
@@ -277,8 +288,8 @@ if [ -z "$EXISTING" ]; then
   az storage account blob-service-properties update --account-name "$STATE_ACCOUNT" --resource-group "$STATE_RG" \
     --enable-versioning true --output none
   account_id=$(az storage account show --name "$STATE_ACCOUNT" --resource-group "$STATE_RG" --query id --output tsv)
-  # Public network access stays Disabled (managed-tenant policy enforces it); an enforced network security
-  # perimeter admits only this machine's address. ARM REST avoids the preview nsp CLI extension.
+  # Public access remains Disabled; these perimeter rules do not provide laptop data-plane connectivity.
+  # Use the private executor entry point above. ARM REST avoids the preview nsp CLI extension.
   nsp_id="/subscriptions/$SUBSCRIPTION/resourceGroups/$STATE_RG/providers/Microsoft.Network/networkSecurityPerimeters/nsp-$PREFIX-tfstate"
   nsp_api=api-version=2024-07-01
   az rest --method put --url "$nsp_id?$nsp_api" --body "{\"location\":\"$LOCATION\"}" --output none
@@ -319,10 +330,7 @@ if [ "$(az keyvault show-deleted --name "$VAULT" --query name --output tsv 2>/de
   printf 'Recovering the soft-deleted Key Vault %s; Terraform adopts it instead of creating a new one\n' "$VAULT"
   az group create --name "rg-$PREFIX" --location "$LOCATION" --output none
   az keyvault recover --name "$VAULT" --output none
-  if [ "$VAULT_IP" = true ]; then
-    az keyvault update --name "$VAULT" --public-network-access Enabled --default-action Deny --output none
-    az keyvault network-rule add --name "$VAULT" --ip-address "$my_ip/32" --output none
-  fi
+  az keyvault update --name "$VAULT" --public-network-access Disabled --output none
   role_id() {
     az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type User \
       --role "$1" --scope "$VAULT_ID" --query id --output tsv
@@ -345,7 +353,7 @@ JSON
       --query id --output none 2>/dev/null; then reachable=true; break; fi
     sleep "${DEPLOY_ROLE_WAIT_SECONDS:-10}"
   done
-  [ "$reachable" = true ] || printf 'deploy: warning: cannot read the recovered vault yet; outside the virtual network pass --vault-allow-my-ip\n' >&2
+  [ "$reachable" = true ] || printf 'deploy: warning: cannot read the recovered vault; use the private executor or approved private connectivity\n' >&2
 elif [ -f "$ADOPT" ] && [ "$(az keyvault show --name "$VAULT" --query name --output tsv 2>/dev/null)" != "$VAULT" ]; then
   rm -f "$ADOPT"
 fi
@@ -360,12 +368,12 @@ if [ -z "$DIGEST" ]; then
   cat <<NEXT
 
 Platform deployed without the application. Next:
-  1. Store the demo passcode (from a network that can reach the vault, or after a run with --vault-allow-my-ip):
-       az keyvault secret set --vault-name $vault --name demo-passcode --value '<passcode>'
+  1. Store the demo passcode from approved private connectivity using a protected file:
+       az keyvault secret set --vault-name $vault --name demo-passcode --file /protected/passcode.txt --output none
 NEXT
   [ -z "$RUNNER_REPO" ] || cat <<NEXT
   2. Store a fine-grained GitHub token for $RUNNER_REPO (Administration: read and write); the runner registers within a minute:
-       az keyvault secret set --vault-name $vault --name github-runner-token --value '<token>'
+       az keyvault secret set --vault-name $vault --name github-runner-token --file /protected/runner-token.txt --output none
 NEXT
   cat <<NEXT
   3. Run the build workflow (PUBLISH_IMAGE=true) and the release workflow on the private-acr runner to push and sign the image.

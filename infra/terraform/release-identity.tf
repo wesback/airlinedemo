@@ -29,6 +29,19 @@ resource "azurerm_user_assigned_identity" "release" {
   resource_group_name = azurerm_resource_group.demo.name
 }
 
+resource "azurerm_role_assignment" "release_environment" {
+  scope                = azurerm_container_app_environment.demo.id
+  role_definition_name = "Container Apps Operator"
+  principal_id         = azurerm_user_assigned_identity.release.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_role_assignment" "release_app_identity" {
+  scope                = azurerm_user_assigned_identity.app.id
+  role_definition_name = "Managed Identity Operator"
+  principal_id         = azurerm_user_assigned_identity.release.principal_id
+  principal_type       = "ServicePrincipal"
+}
 
 # Build workflow: runs only from main, pushes images to the private ACR.
 resource "azurerm_federated_identity_credential" "build" {

@@ -10,16 +10,32 @@ for name in RESOURCE_GROUP_NAME TFVARS_FILE BACKEND_CONFIG_FILE AZURE_SUBSCRIPTI
 done
 
 resource_group=$RESOURCE_GROUP_NAME
+plan_only=
+apply_plan=
+validate_only=false
 confirmed=false
-for argument in "$@"; do
-  if [ "$argument" = "--yes" ]; then
-    confirmed=true
-  fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes) confirmed=true; shift ;;
+    --plan-only|--apply-plan|--check-plan)
+      [ $# -ge 2 ] || { printf 'Missing plan path for %s\n' "$1" >&2; exit 2; }
+      if [ "$1" = --plan-only ]; then plan_only=$2; else apply_plan=$2; fi
+      if [ "$1" = --check-plan ]; then validate_only=true; fi
+      shift 2 ;;
+    *) printf 'Unknown destroy argument: %s\n' "$1" >&2; exit 2 ;;
+  esac
 done
-if [ "$confirmed" != true ]; then
+[ -z "$plan_only" ] || [ -z "$apply_plan" ] || { printf 'Choose --plan-only or --apply-plan, not both\n' >&2; exit 2; }
+if [ "$confirmed" != true ] && [ -z "$plan_only" ] && [ "$validate_only" != true ]; then
   printf 'Destroy requires explicit confirmation: pass --yes\n' >&2
   exit 2
 fi
+
+case "$TFVARS_FILE" in /*) ;; *) TFVARS_FILE="$PWD/$TFVARS_FILE" ;; esac
+case "$BACKEND_CONFIG_FILE" in /*) ;; *) BACKEND_CONFIG_FILE="$PWD/$BACKEND_CONFIG_FILE" ;; esac
+case "$plan_only" in ""|/*) ;; *) plan_only="$PWD/$plan_only" ;; esac
+case "$apply_plan" in ""|/*) ;; *) apply_plan="$PWD/$apply_plan" ;; esac
+cd "$(dirname "$0")/.."
 
 for command_name in terraform az; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -60,6 +76,32 @@ if [ "$lower_state_id" != "$lower_expected_id" ]; then
   exit 3
 fi
 
-terraform -chdir=infra/terraform destroy -var-file="$TFVARS_FILE" -var="resource_group_name=$resource_group" -auto-approve
+if [ -n "$plan_only" ]; then
+  umask 077
+  terraform -chdir=infra/terraform plan -destroy -var-file="$TFVARS_FILE" -var="resource_group_name=$resource_group" -out="$plan_only"
+  printf 'Saved destroy plan for %s: %s\n' "$resource_group" "$plan_only"
+  exit 0
+fi
+
+if [ -n "$apply_plan" ]; then
+  terraform -chdir=infra/terraform show -json "$apply_plan" | python3 -c '
+import json, sys
+plan = json.load(sys.stdin)
+expected = sys.argv[1].lower()
+changes = plan.get("resource_changes", [])
+group = [c for c in changes if c["address"] == "azurerm_resource_group.demo"]
+if len(group) != 1 or group[0]["change"]["actions"] != ["delete"] or group[0]["change"]["before"]["id"].lower() != expected:
+    raise SystemExit("Saved plan is not a destroy of the confirmed resource group")
+if any(c["change"]["actions"] not in (["delete"], ["no-op"], ["read"]) for c in changes):
+    raise SystemExit("Saved destroy plan contains a non-destroy change")
+' "$expected_id"
+  if [ "$validate_only" = true ]; then
+    printf 'Verified saved destroy plan for %s; nothing applied.\n' "$resource_group"
+    exit 0
+  fi
+  terraform -chdir=infra/terraform apply "$apply_plan"
+else
+  terraform -chdir=infra/terraform destroy -var-file="$TFVARS_FILE" -var="resource_group_name=$resource_group" -auto-approve
+fi
 
 printf 'Destroyed deployment resources for %s.\n' "$resource_group"

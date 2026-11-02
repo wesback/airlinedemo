@@ -46,23 +46,17 @@ The interface opens on the journey board: every aircraft in the return pool sits
 
 ## Quick deploy
 
-For a demonstration environment, sign in with `az login` and run one command twice. Everything Azure CLI already knows (tenant, subscription, your object id, name and email) is read from the sign-in, every resource name and network range derives from `--prefix`, and the protected Terraform state backend is created for you (Entra-only, no shared keys, versioned, public network access disabled and reached through an enforced network security perimeter `nsp-<prefix>-tfstate` that admits only this machine's address; a rerun updates the address).
+Use the [complete private deployment manual](docs/deployment.md). After Azure/GitHub sign-in and the one-time repository protection setup, only tenant ID and subscription ID are required:
 
 ```sh
 az login --tenant <tenant-id>
-scripts/deploy.sh --presenter-cidrs 84.196.152.13/32 \
-  --allow-my-ip --vault-allow-my-ip --register-providers
+az account set --subscription <subscription-id>
+scripts/deploy.sh --tenant-id <tenant-id> --subscription-id <subscription-id>
 ```
 
-The first run creates the platform only: the network, registry, Key Vault, data services, model gateway and identities, but no Container App, because the image must be pushed into this deployment's private registry first. At the end it prints the next steps:
+Defaults are prefix `demo1` and region `swedencentral`; add `--prefix demoair` for the existing environment. The script provisions an independently managed private executor and protected state, the application platform and SQL migrations, then configures GitHub, builds/signs the image and verifies the app across a restart. Rerun the same command after completing executor device sign-in or personally approving the protected release. Plans still require explicit confirmation; missing demo-passcode/runner-PAT values use hidden prompts.
 
-1. Store the demo passcode in the vault (`az keyvault secret set --vault-name kv-<prefix>-<suffix> --name demo-passcode ...`) and, with `--build-runner`, the GitHub runner token as `github-runner-token`.
-2. Run the build workflow on the `private-acr` runner to push the first image, then run the protected release workflow with `bootstrap_only=true` to sign and verify it without updating the not-yet-created Container App. Product-owner approval and every provenance and signature check still apply.
-3. Run the same command again with `--image-digest sha256:<64 hex> --passcode-secret-uri https://kv-<prefix>-<suffix>.vault.azure.net/secrets/demo-passcode` to create the Container App.
-
-Give both options or neither. After the app exists, the release workflow deploys each new signed digest (`az containerapp update`), and Terraform ignores the running image so a later apply does not roll it back.
-
-The script writes the Terraform variable and backend files to `~/.local/state/airlinedemo/<prefix>/` (outside the repository, mode 600), runs the pre-bootstrap checks, shows one saved plan and applies it only after you type `yes`. `--prepare-only` writes the files and changes nothing in Azure. `--existing-backend <storage account>` uses a state backend an owner already created instead. `--vault-allow-my-ip` admits this machine's address (`deployer_ip_cidrs`) to the Key Vault through an enforced network security perimeter (public network access stays disabled, as managed-tenant policy requires) so Terraform can create the release signing certificate from outside the virtual network; without it, or a run from inside the network, that step cannot reach the vault. A rerun keeps the first `budget_start_date`, so the budget is not replaced every month. `scripts/deploy.sh --help` lists every option. The image is still built, signed and released through the protected `release` workflow. Terraform also creates the Entra application the model gateway trusts (identifier URI `api://<client id>`, app role `Gateway.Invoke` assigned to the app identity), so the deployer needs the right to register applications in the tenant (the Application Developer role when user app registration is turned off).
+Files stay outside Git in `~/.local/state/airlinedemo/<prefix>/`. Public data-service access stays disabled: an NSP IP rule does **not** make a disabled public endpoint reachable. The older low-level switches remain available to existing private-network operators, but the tenant/subscription entry point is the complete deployment path.
 
 The rest of this file describes the controlled path for organization deployments, where each input is approved and supplied separately.
 
@@ -74,7 +68,7 @@ Organization owners must approve network CIDRs, permitted egress, private DNS, s
 
 Before deployment, review `infra/terraform/variables.tf` and `infra/terraform/tests/`. Empty presenter/reviewer CIDRs create an empty ingress allowlist and deny all ingress. Terraform 1.17 or later is required.
 
-The model gateway (API Management, internal virtual network mode) gets its own subnet, `gateway_subnet_cidr`, which defaults to `cidrsubnet(vnet_address_space[0], 8, 3)`. It must be in the deployment `location`; `gateway_region`, `gateway_model_deployment` and `gateway_approved_application_identity` default to the location, the created model deployment and the application's managed identity. Key Vault keeps public network access disabled unless `deployer_ip_cidrs` lists addresses that may reach its data plane. Log Analytics and Application Insights accept ingestion and queries only through an Azure Monitor Private Link Scope with a private endpoint in the virtual network; query them from a network that resolves the `privatelink.*` monitor zones.
+The model gateway (API Management, internal virtual network mode) gets its own subnet, `gateway_subnet_cidr`, which defaults to `cidrsubnet(vnet_address_space[0], 8, 3)`. It must be in the deployment `location`; `gateway_region`, `gateway_model_deployment` and `gateway_approved_application_identity` default to the location, the created model deployment and the application's managed identity. Key Vault keeps public network access disabled; use private DNS/endpoints from the deployment executor. Log Analytics and Application Insights accept ingestion and queries only through an Azure Monitor Private Link Scope with a private endpoint in the virtual network; query them from a network that resolves the `privatelink.*` monitor zones.
 
 The registry and Key Vault have no public endpoint, so the `private-acr` jobs in the build and release workflows need a self-hosted runner inside the virtual network. Set `enable_build_runner` (or pass `--build-runner <owner/repo>` to `scripts/deploy.sh`) to create one: an Ubuntu VM with Docker and Azure CLI in its own subnet (`build_runner_subnet_cidr`, default `cidrsubnet(vnet_address_space[0], 8, 4)`), no public address or inbound access, and outbound through a NAT gateway. At boot it reads a GitHub token from the Key Vault secret `build_runner_token_secret_name` (default `github-runner-token`) and registers with the label `private-acr`. Terraform creates that secret with the value `unset` and never overwrites it; set the real value afterwards (`az keyvault secret set`) and the VM, which retries every minute for 24 hours, registers itself. Use a fine-grained token limited to the repository, with Administration read and write permission. The VM's identity can read only that secret; the jobs still sign in with their own OIDC identities.
 
@@ -146,7 +140,7 @@ export BACKEND_CONFIG_FILE=~/.local/state/airlinedemo/<prefix>/backend.hcl
 
 The script destroys only Terraform deployment-owned resources. The protected state backend is handled separately by its owner. Follow the [full teardown procedure](docs/aircraft-return-readiness/README.md#removal-and-teardown), revoke temporary release access, and remove the Key Vault passcode only when approved.
 
-The destroy soft-deletes the Key Vault, and purge protection keeps its name, secrets and signing certificate for 90 days. Redeploying with the same prefix in that window works: `scripts/deploy.sh` recovers the soft-deleted vault, grants the deployer the Key Vault Certificates Officer and Secrets Officer roles again, and writes `adopt_key_vault` so Terraform imports the vault, its roles, the signing certificate and the runner token secret instead of creating them. Pass `--vault-allow-my-ip` when you run it from outside the virtual network.
+For a complete rebuild, use the manual's [private teardown/recovery sequence](docs/deployment.md#rebuild-an-existing-application-from-scratch), which preserves the backend/executor and deliberately retains the purge-protected signing certificate and runner secret before deleting the application. Same-prefix recovery remains private; do not use a public-access exception.
 
 ## Evidence
 
