@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/azuread"
       version = "~> 3.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 
   # Entra auth only; the azurerm backend takes a blob lease for state locking.
@@ -41,6 +45,8 @@ locals {
     model = "privatelink.openai.azure.com"
     kv    = "privatelink.vaultcore.azure.net"
     acr   = "privatelink.azurecr.io"
+    # Content Safety is a Cognitive Services account, served from <subdomain>.cognitiveservices.azure.com.
+    contentsafety = "privatelink.cognitiveservices.azure.com"
   }
 
   private_endpoints = {
@@ -49,6 +55,8 @@ locals {
     model = { resource_id = azurerm_cognitive_account.model.id, subresource = "account", zone = "model" }
     kv    = { resource_id = azurerm_key_vault.kv.id, subresource = "vault", zone = "kv" }
     acr   = { resource_id = azurerm_container_registry.acr.id, subresource = "registry", zone = "acr" }
+
+    contentsafety = { resource_id = azurerm_cognitive_account.content_safety.id, subresource = "account", zone = "contentsafety" }
   }
 
   presenter_reviewer_rules = { for i, c in var.presenter_reviewer_cidrs : tostring(i) => c }
@@ -57,6 +65,7 @@ locals {
   gateway_region = coalesce(var.gateway_region, var.location)
   # The client appends /openai/v1/chat/completions; the gateway API path is "openai".
   model_endpoint                        = coalesce(var.gateway_endpoint, azurerm_api_management.gateway.gateway_url)
+  content_safety_endpoint               = "${trimsuffix(local.model_endpoint, "/")}/contentsafety"
   gateway_model_deployment              = coalesce(var.gateway_model_deployment, local.model_deployment_name)
   gateway_approved_application_identity = coalesce(var.gateway_approved_application_identity, azurerm_user_assigned_identity.app.principal_id)
 
@@ -420,6 +429,16 @@ resource "azurerm_network_security_perimeter_association" "key_vault" {
   depends_on = [azurerm_network_security_perimeter_access_rule.deployer]
 }
 
+resource "azurerm_network_security_perimeter_association" "content_safety" {
+  count                                 = length(azurerm_network_security_perimeter.deployer)
+  name                                  = "content-safety"
+  network_security_perimeter_profile_id = azurerm_network_security_perimeter_profile.deployer[0].id
+  resource_id                           = azurerm_cognitive_account.content_safety.id
+  access_mode                           = "Enforced"
+
+  depends_on = [azurerm_network_security_perimeter_access_rule.deployer]
+}
+
 # Key Vault uses RBAC, so the Terraform principal needs data-plane rights to manage the signing certificate.
 resource "azurerm_role_assignment" "terraform_kv_certificates" {
   scope                = azurerm_key_vault.kv.id
@@ -441,6 +460,22 @@ resource "azurerm_cognitive_account" "model" {
   kind                          = "OpenAI"
   sku_name                      = "S0"
   custom_subdomain_name         = local.model_endpoint_subdomain
+  public_network_access_enabled = false
+  local_auth_enabled            = false
+
+  network_acls {
+    default_action = "Deny"
+  }
+}
+
+# Prompt Shields for the copilot, reached only through the gateway's contentsafety API.
+resource "azurerm_cognitive_account" "content_safety" {
+  name                          = local.content_safety_account_name
+  resource_group_name           = azurerm_resource_group.demo.name
+  location                      = "swedencentral"
+  kind                          = "ContentSafety"
+  sku_name                      = "S0"
+  custom_subdomain_name         = local.content_safety_account_name
   public_network_access_enabled = false
   local_auth_enabled            = false
 
@@ -482,6 +517,13 @@ resource "azurerm_api_management" "gateway" {
 resource "azurerm_role_assignment" "gateway_cognitive_services" {
   scope                = azurerm_cognitive_account.model.id
   role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = azurerm_api_management.gateway.identity[0].principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_role_assignment" "gateway_content_safety" {
+  scope                = azurerm_cognitive_account.content_safety.id
+  role_definition_name = "Cognitive Services User"
   principal_id         = azurerm_api_management.gateway.identity[0].principal_id
   principal_type       = "ServicePrincipal"
 }
@@ -578,6 +620,72 @@ resource "azurerm_api_management_api_operation_policy" "gateway_chat_completions
     </choose>
     <rewrite-uri template="/v1/chat/completions" copy-unmatched-params="false" />
     <authentication-managed-identity resource="https://ai.azure.com" />
+  </inbound>
+</policies>
+XML
+}
+
+# Prompt Shields route: {gateway}/contentsafety/text:shieldPrompt reaches {account}/contentsafety/text:shieldPrompt.
+resource "azurerm_api_management_api" "content_safety" {
+  name                  = "content-safety-gateway"
+  resource_group_name   = azurerm_resource_group.demo.name
+  api_management_name   = azurerm_api_management.gateway.name
+  revision              = "1"
+  display_name          = "Private Content Safety gateway"
+  path                  = "contentsafety"
+  protocols             = ["https"]
+  subscription_required = false
+  # The public host name matches the service certificate; the linked private DNS zone resolves it to the private endpoint.
+  service_url = "https://${local.content_safety_account_name}.cognitiveservices.azure.com/contentsafety"
+}
+
+resource "azurerm_api_management_api_operation" "content_safety_shield_prompt" {
+  operation_id        = "shield-prompt"
+  api_name            = azurerm_api_management_api.content_safety.name
+  api_management_name = azurerm_api_management.gateway.name
+  resource_group_name = azurerm_resource_group.demo.name
+  display_name        = "Prompt Shields"
+  method              = "POST"
+  url_template        = "/text:shieldPrompt"
+}
+
+resource "azurerm_api_management_api_operation_policy" "content_safety_shield_prompt" {
+  api_name            = azurerm_api_management_api.content_safety.name
+  api_management_name = azurerm_api_management.gateway.name
+  resource_group_name = azurerm_resource_group.demo.name
+  operation_id        = azurerm_api_management_api_operation.content_safety_shield_prompt.operation_id
+  xml_content         = <<XML
+<policies>
+  <inbound>
+    <base />
+    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="gateway caller identity rejected">
+      <openid-config url="https://login.microsoftonline.com/${var.tenant_id}/v2.0/.well-known/openid-configuration" />
+      <audiences>
+        <audience>${local.gateway_audience}</audience>
+        <audience>${azuread_application.gateway.client_id}</audience>
+      </audiences>
+      <required-claims>
+        <claim name="oid" match="any">
+          <value>${local.gateway_approved_application_identity}</value>
+        </claim>
+        <claim name="roles" match="any">
+          <value>Gateway.Invoke</value>
+        </claim>
+      </required-claims>
+    </validate-jwt>
+    <choose>
+      <when condition="@{
+        var headers = new[] { &quot;x-gateway-arm&quot;, &quot;x-gateway-run&quot;, &quot;x-gateway-package&quot;, &quot;x-gateway-case&quot;, &quot;x-gateway-model-configuration&quot;, &quot;x-gateway-suite-version&quot;, &quot;x-gateway-call-identity&quot; };
+        return headers.Any(name => !context.Request.Headers.ContainsKey(name) || !System.Text.RegularExpressions.Regex.IsMatch(context.Request.Headers.GetValueOrDefault(name, &quot;&quot;), &quot;^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$&quot;));
+      }">
+        <return-response>
+          <set-status code="400" reason="Bad Request" />
+          <set-body>gateway correlation rejected</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <set-backend-service base-url="${azurerm_api_management_api.content_safety.service_url}" />
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
   </inbound>
 </policies>
 XML

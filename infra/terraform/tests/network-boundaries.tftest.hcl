@@ -272,8 +272,8 @@ run "M-13_data_endpoints_are_private" {
     error_message = "Model private endpoint must connect through the account subresource."
   }
   assert {
-    condition     = azurerm_subnet.private_endpoints.address_prefixes[0] == "10.60.2.0/24" && length(azurerm_private_endpoint.demo) == 5
-    error_message = "Private endpoints must be created for SQL, Blob, model, Key Vault and ACR in the configured private endpoint subnet."
+    condition     = azurerm_subnet.private_endpoints.address_prefixes[0] == "10.60.2.0/24" && length(azurerm_private_endpoint.demo) == 6
+    error_message = "Private endpoints must be created for SQL, Blob, model, Key Vault, ACR and Content Safety in the configured private endpoint subnet."
   }
   assert {
     condition     = azurerm_private_dns_zone.demo["model"].name == "privatelink.openai.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["model"].private_dns_zone_name == "privatelink.openai.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["model"].name == "link-model"
@@ -296,12 +296,59 @@ run "M-13_data_endpoints_are_private" {
     error_message = "The model private endpoint must use the account subresource and the privatelink.openai.azure.com zone, in the private endpoint subnet."
   }
   assert {
-    condition     = length(local.private_endpoints) == 5 && can(regex("(?s)private_endpoints = \\{.*sql\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id.*blob\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_storage_account\\.blob\\.id.*model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id", file("main.tf")))
+    condition     = length(local.private_endpoints) == 6 && can(regex("(?s)private_endpoints = \\{.*sql\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_mssql_server\\.sql\\.id.*blob\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_storage_account\\.blob\\.id.*model\\s*=\\s*\\{\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.model\\.id", file("main.tf")))
     error_message = "SQL, Blob and model private endpoints must target their own resources (SQL server, storage account, cognitive account)."
   }
   assert {
     condition     = length(azurerm_subnet.private_endpoints.address_prefixes) == 1 && can(regex("(?s)resource \"azurerm_private_endpoint\" \"demo\" \\{.*?subnet_id\\s*=\\s*azurerm_subnet\\.private_endpoints\\.id.*?private_connection_resource_id\\s*=\\s*each\\.value\\.resource_id", file("main.tf")))
     error_message = "Each private endpoint must attach to the private endpoint subnet and connect to its mapped resource."
+  }
+}
+
+run "content_safety_is_private_and_reached_only_through_the_gateway" {
+  command = plan
+
+  override_resource {
+    target          = azuread_application.gateway
+    override_during = plan
+    values = {
+      id        = "/applications/00000000-0000-0000-0000-0000000000a1"
+      client_id = "00000000-0000-0000-0000-0000000000c1"
+    }
+  }
+
+  assert {
+    condition     = can(regex("^cs-demo-[0-9a-f]{6}$", azurerm_cognitive_account.content_safety.name)) && azurerm_cognitive_account.content_safety.custom_subdomain_name == azurerm_cognitive_account.content_safety.name && azurerm_cognitive_account.content_safety.kind == "ContentSafety" && azurerm_cognitive_account.content_safety.sku_name == "S0" && azurerm_cognitive_account.content_safety.location == "swedencentral"
+    error_message = "Content Safety must be an S0 ContentSafety account in swedencentral with its own custom subdomain."
+  }
+  assert {
+    condition     = azurerm_cognitive_account.content_safety.public_network_access_enabled == false && azurerm_cognitive_account.content_safety.local_auth_enabled == false && azurerm_cognitive_account.content_safety.network_acls[0].default_action == "Deny"
+    error_message = "Content Safety must deny public network access and key authentication."
+  }
+  assert {
+    condition     = azurerm_private_endpoint.demo["contentsafety"].private_service_connection[0].subresource_names == tolist(["account"]) && azurerm_private_dns_zone.demo["contentsafety"].name == "privatelink.cognitiveservices.azure.com" && azurerm_private_dns_zone_virtual_network_link.demo["contentsafety"].name == "link-contentsafety"
+    error_message = "Content Safety must have an account private endpoint registered in the linked privatelink.cognitiveservices.azure.com zone."
+  }
+  assert {
+    condition     = azurerm_api_management_api.content_safety.path == "contentsafety" && azurerm_api_management_api.content_safety.subscription_required == false && azurerm_api_management_api.content_safety.service_url == "https://${azurerm_cognitive_account.content_safety.name}.cognitiveservices.azure.com/contentsafety" && azurerm_api_management_api_operation.content_safety_shield_prompt.method == "POST" && azurerm_api_management_api_operation.content_safety_shield_prompt.url_template == "/text:shieldPrompt"
+    error_message = "The gateway must expose only POST /contentsafety/text:shieldPrompt, forwarded to the account's contentsafety path."
+  }
+  assert {
+    condition = (
+      strcontains(azurerm_api_management_api_operation_policy.content_safety_shield_prompt.xml_content, "failed-validation-httpcode=\"401\"") &&
+      strcontains(azurerm_api_management_api_operation_policy.content_safety_shield_prompt.xml_content, "<value>Gateway.Invoke</value>") &&
+      strcontains(azurerm_api_management_api_operation_policy.content_safety_shield_prompt.xml_content, "<value>${var.gateway_approved_application_identity}</value>") &&
+      strcontains(azurerm_api_management_api_operation_policy.content_safety_shield_prompt.xml_content, "<audience>00000000-0000-0000-0000-0000000000c1</audience>") &&
+      strcontains(azurerm_api_management_api_operation_policy.content_safety_shield_prompt.xml_content, "&quot;x-gateway-call-identity&quot;") &&
+      strcontains(azurerm_api_management_api_operation_policy.content_safety_shield_prompt.xml_content, "<set-backend-service base-url=\"https://${azurerm_cognitive_account.content_safety.name}.cognitiveservices.azure.com/contentsafety\" />") &&
+      strcontains(azurerm_api_management_api_operation_policy.content_safety_shield_prompt.xml_content, "<authentication-managed-identity resource=\"https://cognitiveservices.azure.com\" />") &&
+      !can(regex("(?i)subscription-key", azurerm_api_management_api_operation_policy.content_safety_shield_prompt.xml_content))
+    )
+    error_message = "The Prompt Shields policy must reject callers without the approved identity and Gateway.Invoke role (401), require correlation headers and call the account with the gateway identity."
+  }
+  assert {
+    condition     = azurerm_role_assignment.gateway_content_safety.role_definition_name == "Cognitive Services User" && azurerm_role_assignment.gateway_content_safety.principal_type == "ServicePrincipal" && can(regex("(?s)resource \"azurerm_role_assignment\" \"gateway_content_safety\" \\{\\s*scope\\s*=\\s*azurerm_cognitive_account\\.content_safety\\.id.*?principal_id\\s*=\\s*azurerm_api_management\\.gateway\\.identity\\[0\\]\\.principal_id", file("main.tf")))
+    error_message = "Only the gateway identity gets Cognitive Services User, and only on the Content Safety account."
   }
 }
 

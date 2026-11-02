@@ -145,6 +145,28 @@ run "key_vault_admits_only_deployer_cidrs" {
   }
 }
 
+run "content_safety_stays_private_without_deployer_cidrs" {
+  command = plan
+
+  assert {
+    condition     = azurerm_cognitive_account.content_safety.public_network_access_enabled == false && length(azurerm_network_security_perimeter_association.content_safety) == 0
+    error_message = "Without deployer CIDRs Content Safety must stay private with no perimeter association."
+  }
+}
+
+run "content_safety_joins_the_deployer_perimeter" {
+  command = plan
+
+  variables {
+    deployer_ip_cidrs = ["198.51.100.7/32"]
+  }
+
+  assert {
+    condition     = azurerm_cognitive_account.content_safety.public_network_access_enabled == false && length(azurerm_network_security_perimeter_association.content_safety) == 1 && azurerm_network_security_perimeter_association.content_safety[0].access_mode == "Enforced" && azurerm_network_security_perimeter_association.content_safety[0].name == "content-safety" && length(azurerm_network_security_perimeter.deployer) == 1 && can(regex("(?s)resource \"azurerm_network_security_perimeter_association\" \"content_safety\" \\{.*?network_security_perimeter_profile_id\\s*=\\s*azurerm_network_security_perimeter_profile\\.deployer\\[0\\]\\.id\\s*resource_id\\s*=\\s*azurerm_cognitive_account\\.content_safety\\.id", file("main.tf")))
+    error_message = "With deployer CIDRs Content Safety must join the existing deployer profile in Enforced mode; public access stays disabled."
+  }
+}
+
 run "rejects_invalid_deployer_cidr" {
   command = plan
 
