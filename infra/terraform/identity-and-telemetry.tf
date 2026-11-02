@@ -56,7 +56,7 @@ locals {
   app_append_only_tables = [
     "investigation_traces", "investigation_trace_steps", "case_assessments",
     "case_request_receipts", "case_journey_events", "case_pack_reset_receipts",
-    "copilot_invocations", "copilot_proposals", "copilot_release_receipts",
+    "copilot_invocations", "copilot_proposals", "copilot_release_receipts", "copilot_invocation_details",
   ]
   # Shared ledger keeps source-read limits atomic across app instances.
   app_source_read_table = "dbo.source_read_windows"

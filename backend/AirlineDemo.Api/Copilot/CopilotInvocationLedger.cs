@@ -202,10 +202,12 @@ public static class CopilotInvocationLedgerRegistration
             CaseStateStoreRegistration.ValidateManagedIdentityConnectionString(connectionString);
             var options = new DbContextOptionsBuilder<CaseStateDbContext>().UseSqlServer(connectionString).Options;
             services.AddSingleton<ICopilotInvocationStore>(new SqlCopilotInvocationStore(options));
+            services.AddSingleton<ICopilotInvocationDetailStore>(new SqlCopilotInvocationDetailStore(options));
         }
         else
         {
             services.AddSingleton<ICopilotInvocationStore, InMemoryCopilotInvocationStore>();
+            services.AddSingleton<ICopilotInvocationDetailStore, InMemoryCopilotInvocationDetailStore>();
         }
         services.AddSingleton<ICopilotInvocationLedger, CopilotInvocationLedger>();
         return services;
