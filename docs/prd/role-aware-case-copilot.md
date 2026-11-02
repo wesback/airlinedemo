@@ -2,12 +2,12 @@
 prd_id: "role-aware-case-copilot"
 title: "Role-Aware Case Copilot over Five MCP Tools"
 status: "draft"
-version: "0.1.0"
+version: "0.2.0"
 owners: ["wesback"]
 reviewers: ["wesback"]
 created_date: "2026-10-30"
-last_updated: "2026-10-30"
-product_goal_ids: ["GOAL-001", "GOAL-002", "GOAL-003", "GOAL-004"]
+last_updated: "2026-11-02"
+product_goal_ids: ["GOAL-001", "GOAL-002", "GOAL-003", "GOAL-004", "GOAL-005"]
 product_goal_smart_status: "deferred"
 fr_to_ac_coverage_threshold_pct: 80.0
 fr_to_goal_coverage_threshold_pct: 100.0
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Role-Aware Case Copilot over Five MCP Tools
 
-> **role-aware-case-copilot** | Status: draft | Version: 0.1.0 | Last Updated: 2026-10-30
+> **role-aware-case-copilot** | Status: draft | Version: 0.2.0 | Last Updated: 2026-11-02
 
 ## Executive Summary
 
@@ -115,15 +115,20 @@ Trust boundaries are the browser/server session boundary, model/host dispatch bo
 | DD-001 | D1: Use current demo sessions in the existing net10.0 app. Real OAuth OBO and general external OAuth connectors are deferred. |
 | DD-002 | Use SDK `ModelContextProtocol.AspNetCore` 2.3.0, explicit `Stateless` SessionMode, Streamable HTTP at same-origin `/mcp`, and wire compatibility scope **2025-11-25 only** for this release. SDK support for 2026-07-28 is evidenced, but its additional bootstrap is not an acceptance commitment here. |
 | DD-003 | D2: `advance_stage` means only presenter final simulated release. It never advances UI gates or performs technical, finance or legal decisions. |
-| DD-004 | D5: Same-origin release; MCP APIM routing is deferred. Reuse the existing governed model gateway route without infrastructure, provider-manifest, credential or cloud changes. |
+| DD-004 | D5: Same-origin release; MCP APIM routing is deferred. Reuse the existing governed model gateway route without infrastructure, provider-manifest, credential or cloud changes. Amended by Addendum A (DD-013): the model route stays exactly as it is; the separate Content Safety route in the CON-002 allowlist is the only addition. |
 | DD-005 | D3/D7: Immutable API proposal, trusted UI approval, then exact tool retry. Expiry is creation plus five minutes; approval does not extend it. Success consumes approval atomically with release, original receipt and business audit. |
 | DD-006 | D6/D8/D9: Include a minimal model client and one-question UI. Free questions are untrusted USER messages; context is closed structure; raw sources are UI-only across the entire model execution. No persisted conversation product. |
 | DD-007 | Human merge of this PRD by wesback explicitly approves FR-013's new copilot input contract, not an investigator gate relaxation or provider change. Until that merge, no implementation/content-policy approval is claimed. |
-| DD-008 | D4: API-owned invocation ledger separate from business revision. Authorized-case attempts, including denials, project into case activity; list/no-case/anonymous/out-of-scope/missing attempts remain caller/security-only. |
+| DD-008 | D4: API-owned invocation ledger separate from business revision. Authorized-case attempts, including denials, project into case activity; list/no-case/anonymous/out-of-scope/missing attempts remain caller/security-only. Amended by Addendum A (DD-016, FR-032): model tool calls the Q&A loop refuses before dispatch are ledgered against the trusted selected case, and an activity entry may carry the append-only details of FR-026. |
 | DD-009 | Safe summary/open-point projections are in-scope API prerequisites. They expose closed fields and enforce role/case visibility before source calls; MCP does not repair raw APIs by applying its own business filter. |
 | DD-010 | Source matrix and limits remain SRC:DD-023/DD-024, with actual current endpoint failures authoritative over older prose. Both direct and MCP record reads use the same session key and admission store. |
 | DD-011 | Release notes originate in trusted UI input, never model context. The host binds that note to the authenticated request context, then to the immutable proposal; models cannot set or alter a note or approve a proposal. |
 | DD-012 | Subsequent user direction: authoring ends at draft creation; manual HVE RPI owns subsequent planning, security/quality review and implementation here, not automatic post-merge story handoff. Preserve the human PRD-merge gate. The parent must resolve the feature-specific non-pickup approval route; no pipeline skip mechanism is assumed. Later work slices retain the repository's at-most-500-changed-line discipline including tests; this PRD creates no plans, issues or labels. |
+| DD-013 | Addendum A, D1 (wesback, 2026-11-02): Prompt Shields is reached through one new `ContentSafety` account behind a new APIM `contentsafety` API, with managed identity, private networking and the deployer network security perimeter. Synthetic source record field text may be sent there and only there (CON-006 as amended). |
+| DD-014 | Addendum A, D2 (wesback): fail-visible. When screening is unavailable or unconfigured, records still show with `screening.state = "unavailable"`, a neutral chip and a trail row. Containment never depends on screening. |
+| DD-015 | Addendum A, D3 (wesback): determinism through a verdict cache keyed by record identity and a text digest, a task card fallback reference in technical open points, and a documented demo question. Signed fixtures stay unchanged. |
+| DD-016 | Addendum A, D4 (wesback): a separate append-only details table, the display user resolved at read time from `callerRef`, and one merged Activity panel with an All / Copilot / UI filter and an entry detail view. |
+| DD-017 | Addendum A, D5: delivery follows DD-012. This addendum is merged by a person first; manual HVE RPI then implements it phase by phase, each slice at most 500 changed lines including tests. A person merges and deploys the infrastructure slice. No AI-SDLC stories are wanted. |
 
 ---
 
@@ -136,7 +141,8 @@ All goals are MUST for the first same-origin feature release; wesback owns measu
 | GOAL-001 | Make the four example questions reachable through five role-aware tools without widening resource visibility. | By release acceptance, AC-001 through AC-009 and AC-040 pass: 10/10 criteria. |
 | GOAL-002 | Keep final release human-authorized, exactly bound, atomic and replay-safe while preserving existing gates. | By release acceptance, AC-012 through AC-023 pass: 12/12 criteria; zero duplicate releases/business audits in retry tests. |
 | GOAL-003 | Bound model effects and exclude raw source prose from every model request without weakening the investigator. | By release acceptance, AC-024 through AC-033 and AC-042 pass: 11/11 criteria; zero source-body leaks or unintended hostile-model effects. |
-| GOAL-004 | Make feature activity accountable without business revision drift, prompt persistence or new cloud operations. | By release acceptance, AC-010, AC-011 and AC-034 through AC-039 and AC-041 pass: 9/9 criteria. |
+| GOAL-004 | Make feature activity accountable without business revision drift, prompt persistence or cloud operations beyond the Addendum A allowlist in CON-002. | By release acceptance, AC-010, AC-011 and AC-034 through AC-039 and AC-041 pass: 9/9 criteria. |
+| GOAL-005 | Addendum A showcase: the presenter shows a source-record injection attempt detected by the platform and contained, then replays every copilot action from the case trail. | By Addendum A acceptance, AC-043 through AC-061 pass: 19/19 criteria; the same seeded case gives the same verdict on every run. |
 
 **SMART Evaluation**: Authoring self-check; formal assessment remains pending.
 
@@ -162,17 +168,17 @@ All FRs are MUST. The following tables and contract definitions are normative pa
 | FR-004 | Provide an API-owned safe `get_case_summary` projection, reusing canonical API statuses and role next actions without scene/raw-state prose. | User requests selected-case readiness. | GOAL-001 | AC-005 |
 | FR-005 | Provide an API-owned open-point projection with the precise role/field outcomes below, not the existing worklist or raw finance response. | User requests selected-case open work. | GOAL-001 | AC-006, AC-007 |
 | FR-006 | Route `read_source` metadata and record operations through their existing API contracts with unchanged entitlements, errors and shared record-read admission. | User requests source evidence. | GOAL-001 | AC-008, AC-009, AC-040 |
-| FR-007 | Persist API-owned durable invocation admission before data/model-sensitive work, and correlate an append-only outcome; fail closed if admission storage is unavailable. | Any tool, Q&A execution or confirmation control action. | GOAL-004 | AC-010, AC-011, AC-041 |
+| FR-007 | Persist API-owned durable invocation admission before data/model-sensitive work, and correlate an append-only outcome; fail closed if admission storage is unavailable. The admit/outcome record is unchanged by Addendum A; FR-026 adds a separate append-only details row keyed by `invocationId`. | Any tool, Q&A execution or confirmation control action. | GOAL-004 | AC-010, AC-011, AC-041 |
 | FR-008 | Create and persist an immutable final-release proposal bound to the canonical command, creator, exact session and creation-relative expiry. | Presenter first invokes `advance_stage` with trusted note context. | GOAL-002 | AC-012, AC-013 |
 | FR-009 | Record approve/decline/cancel only through authenticated, same-origin, CSRF-protected trusted UI showing the exact proposal. | Presenter explicitly selects a confirmation control. | GOAL-002 | AC-014, AC-015 |
 | FR-010 | Execute final simulated release only on an exact approved tool retry, revalidating current API role/scope/revision/gates atomically with the business commit. | Presenter retries approved `advance_stage`. | GOAL-002 | AC-016, AC-017, AC-018, AC-019, AC-020, AC-021 |
 | FR-011 | Persist the original release receipt with successful consumption, and return that exact receipt on same-command replay without another business change. | Same presenter/session retries a successful proposal. | GOAL-002 | AC-022, AC-023 |
 | FR-012 | Reuse the existing lazy, manifest-approved `IChatClient` provider boundary and correlation behavior without direct fallback or privileged tool credentials. | User explicitly sends one question. | GOAL-003 | AC-024, AC-025 |
-| FR-013 | Admit only the reviewed copilot question/structural-context contract below; preserve the investigator gate and keep source bodies out of all model messages. | Before every model attempt, including retries and tool follow-ups. | GOAL-003 | AC-025, AC-026, AC-027 |
+| FR-013 | Admit only the reviewed copilot question/structural-context contract below; preserve the investigator gate and keep source bodies out of all model messages. Addendum A exception: synthetic source record field text may go to Content Safety Prompt Shields through the APIM `contentsafety` API for screening (FR-020), and only there; it never enters a model message and is never stored. | Before every model attempt, including retries and tool follow-ups. | GOAL-003 | AC-025, AC-026, AC-027 |
 | FR-014 | Validate every model-requested tool name, schema and selected-case binding before same-user MCP dispatch; never execute arbitrary URLs, files or model approval. | Model emits a proposed tool call. | GOAL-003 | AC-027, AC-028, AC-042 |
 | FR-015 | Bind citation/navigation data only to source/record/version tuples actually returned to this user, and render answers as escaped plain text. | Host renders a model answer or evidence link. | GOAL-003 | AC-029, AC-030 |
 | FR-016 | Deliver one-question UI with explicit send, selected-case binding, synthetic-input notice, separate escaped record pane and trusted confirmation; store no multi-turn history. | User opens the copilot surface or sends a question. | GOAL-003 | AC-030, AC-031, AC-032, AC-033 |
-| FR-017 | Expose authorized copilot activity independently of existing business history/run/basis projections and suppress unauthorized case activity. | User reads case activity after a copilot attempt. | GOAL-004 | AC-034, AC-035 |
+| FR-017 | Expose authorized copilot activity independently of existing business history/run/basis projections and suppress unauthorized case activity. Amended by Addendum A: the copilot activity API stays separate; its `items` gain the FR-026 to FR-029 fields additively, and the UI merges it with business history client-side (FR-027). | User reads case activity after a copilot attempt. | GOAL-004 | AC-034, AC-035 |
 | FR-018 | Return the exact bounded error contracts below and isolate new route-specific execution limits from existing investigator/source behavior. | Invalid, denied, failed or over-budget execution. | GOAL-004 | AC-036, AC-037, AC-038, AC-039, AC-041 |
 
 **Transport and tool schemas (FR-001/FR-014).** Tool names are case-sensitive. Every argument object rejects duplicate keys, extra properties, incorrect types, null required values, and coercion. IDs are nonempty ASCII strings of at most 128 characters; case/source/record IDs additionally require server-side canonical membership and entitlement, not just a regex. Revision numbers are integers in `0..9223372036854775806`. Optional properties must be omitted, not sent as null. No tool accepts identity, role, cookie, CSRF, prompt, template, approval Boolean, endpoint URL or network/file arguments.
@@ -245,9 +251,9 @@ Release receipt fields are exactly `{contractVersion:1, proposalId, caseId, deci
 
 Failures preserve the proposal's prior approval state, receipt set, business revision, basis content/digests, current run/history and release audit. An admission/outcome invocation record is independent and can change on a failed or replayed invocation. Every successful replay receives a new invocation ID/audit, but never a second `aircraft.released`.
 
-**Audit contract (FR-007/FR-017).** Append-only admit/outcome records are application persistence, not prompt telemetry. Each record contains exactly `invocationId` (server UUID), `phase` (`admit/outcome`), `at` (UTC instant), `operation` (the five tool names or `question/approve/decline/cancel/rejected-operation`), `provenance` (`copilot-client/mcp-direct/trusted-ui`), `callerRef` (opaque pseudonymous user reference or null), `sessionRef` (keyed nonreversible exact-session reference or null), `role` (five known roles or `unknown/anonymous`), `authorizedCaseRef` (canonical authorized case ID or null), `outcome` (`admitted/succeeded/denied/failed/cancelled`), `httpStatus` (null on admission, integer on outcome), and `resultCode` (null on admission, a closed catalogue code or `ok/confirmation_required/cancelled` on outcome). Unknown operation names become `rejected-operation`, never raw strings.
+**Audit contract (FR-007/FR-017).** Append-only admit/outcome records are application persistence, not prompt telemetry. Each record contains exactly `invocationId` (server UUID), `phase` (`admit/outcome`), `at` (UTC instant), `operation` (the five tool names or `question/approve/decline/cancel/rejected-operation`), `provenance` (`copilot-client/mcp-direct/trusted-ui`), `callerRef` (opaque pseudonymous user reference or null; Addendum A resolves it to a demo display name at read time only, per FR-026, and never stores the name), `sessionRef` (keyed nonreversible exact-session reference or null), `role` (five known roles or `unknown/anonymous`), `authorizedCaseRef` (canonical authorized case ID or null), `outcome` (`admitted/succeeded/denied/failed/cancelled`), `httpStatus` (null on admission, integer on outcome), and `resultCode` (null on admission, a closed catalogue code or `ok/confirmation_required/cancelled` on outcome). Unknown operation names become `rejected-operation`, never raw strings.
 
-The server binds provenance to its actual authenticated dispatch path; a caller header/argument saying “copilot” is ignored/rejected. List/no-case/anonymous/out-of-scope/nonexistent attempts use `authorizedCaseRef:null` and never store the supplied unauthorized case ID. Authorized-case denials have the authorized reference and appear in case activity as **from copilot**, with operation/time/outcome only. Caller/security ledger is not exposed as a global case feed. Raw question, prompt, answer, source body, release note, raw audit history, cookie, CSRF, IP, hostname, user agent and identifying network values are excluded.
+The server binds provenance to its actual authenticated dispatch path; a caller header/argument saying “copilot” is ignored/rejected. List/no-case/anonymous/out-of-scope/nonexistent attempts use `authorizedCaseRef:null` and never store the supplied unauthorized case ID. Authorized-case denials have the authorized reference and appear in case activity as **from copilot**, with operation/time/outcome, plus the Addendum A fields of FR-026 to FR-029: the resolved user, role, provenance, record identity tuples and screening verdict filtered by the viewer's source visibility (FR-032), proposal link, and gate name, result and blocker codes. No content is ever shown. Caller/security ledger is not exposed as a global case feed. Raw question, prompt, answer, source body, release note, raw audit history, cookie, CSRF, IP, hostname, user agent and identifying network values are excluded.
 
 Durable admission must complete before source calls, model requests or business actions. If append fails, return `503 audit_unavailable` and perform zero downstream sensitive actions. Outcome append failure returns the same error and stops further dispatch; it cannot undo an already completed read/model call. For release, outcome persistence participates in the successful atomic transaction so failure rolls back business changes too. An unavailable append cannot be represented as recorded success. Operational failure diagnostics are separate from this ledger.
 
@@ -362,7 +368,7 @@ For overlapping errors, authenticate and validate Origin/Host/CSRF first, then s
 
 ### Portability
 
-**NFR-014 (MUST):** The feature runs within existing same-origin demo hosting and repository-supported SQL/in-memory stores; no new containers, external MCP host, tenant resource, credential, APIM route or infrastructure change is required. Switching store mode must preserve confirmation and invocation invariants. Covers FR-007/FR-010/FR-018; AC-018, AC-037, AC-039.
+**NFR-014 (MUST):** The feature runs within existing same-origin demo hosting and repository-supported SQL/in-memory stores; no new containers, external MCP host, tenant resource, credential, APIM route or infrastructure change is required, except the Addendum A allowlist in CON-002. Switching store mode must preserve confirmation and invocation invariants. Covers FR-007/FR-010/FR-018; AC-018, AC-037, AC-039.
 
 ---
 
@@ -371,11 +377,11 @@ For overlapping errors, authenticate and validate Origin/Host/CSRF first, then s
 | ID | Constraint | Imposing source / category | Affected boundary, non-negotiability and impact |
 | --- | --- | --- | --- |
 | CON-001 | Exactly five model tools and one final simulated business write; no reviewer decisions, gate navigation, reset, upload, source-mode change, notice, lessee contact or other business write. | D2; ARR authority boundary / technical | Product/write scope is fixed by user decision; FR-001/FR-010/FR-014 and AC-001/AC-017/AC-042 enforce it. |
-| CON-002 | OAuth OBO, MCP APIM routing, full chat/persisted multi-turn history, live data and cloud changes are out of scope and forbidden in this release, not prerequisites. | D1/D5/D8; ARR synthetic scope / technical, operational | Same-origin demo boundary; FR-012/FR-016/FR-018, AC-031/AC-037. Existing model APIM route is unchanged. |
+| CON-002 | OAuth OBO, MCP APIM routing, full chat/persisted multi-turn history, live data and cloud changes are out of scope and forbidden in this release, not prerequisites. Addendum A (DD-013) allows exactly these cloud changes and nothing else: one `ContentSafety` cognitive account (local auth off, public network access off); its private endpoint; its association with the existing `deployer` network security perimeter profile (Enforced, present only when deployer CIDRs are set, as for Key Vault); a new `privatelink.cognitiveservices.azure.com` private DNS zone and its VNet link; one APIM API `contentsafety` with its one operation, policy and backend; one `Cognitive Services User` role assignment for the APIM system identity on that account; the `ContentSafety__Endpoint` app setting; one Key Vault secret for `Copilot__AuditKey` and its container app secret reference; and the `copilot_invocation_details` table added to the exported `app_sql_grant_statements` with `SELECT` and `INSERT` only. | D1/D5/D8; ARR synthetic scope / technical, operational; Addendum A D1 | Same-origin demo boundary; FR-012/FR-016/FR-018, AC-031/AC-037/AC-060. Existing model APIM route is unchanged. |
 | CON-003 | SRC:DD-023 and SRC:DD-024 are canonical source entitlements and limits; current delivered failure/envelope behavior wins over older narrative. | SRC version 0.9.1 and research C3/C9 / technical | No visibility widening, budget reset or direct-port shortcut; FR-006, AC-008/AC-009/AC-040. |
 | CON-004 | Safe role projections, invocation append, proposal/approval and atomic receipt support are API prerequisites inside this feature; MCP contains no new business policy. | F2/F6/F7 and D7 / technical | Existing raw API and release receipt gaps cannot be assumed delivered; FR-004/FR-005/FR-007 through FR-011. |
 | CON-005 | wesback's human merge of this PRD is the explicit new copilot input-policy approval; the investigator exact-hash gate and approved provider-manifest boundary are not relaxed. | D9; ARR:DD-025/DD-034; research C10/C11/C14 / organizational, technical | No implementation before merge; FR-012/FR-013, AC-025. No additional named approval is invented. |
-| CON-006 | Raw source text is UI-only and absent from every model message; no raw question/answer/note/source/credential diagnostic persistence. | D9 / technical, privacy | Separately project tool results; prompts cannot embed sources; FR-013/FR-015/FR-016, AC-026/AC-027/AC-035. |
+| CON-006 | Raw source text is UI-only and absent from every model message; no raw question/answer/note/source/credential diagnostic persistence. Addendum A exception: synthetic source record field text may be sent to Content Safety Prompt Shields through the APIM `contentsafety` API for screening, and to no other processor. It never enters a model message, a log, a cache key or a store. | D9 / technical, privacy; Addendum A D1 | Separately project tool results; prompts cannot embed sources; FR-013/FR-015/FR-016/FR-020, AC-026/AC-027/AC-035/AC-057. |
 | CON-007 | Approval expiry is five minutes from creation, exact expiry rejects, and successful release/consumption/receipt/business audit are atomic; replay cannot release twice. | D7 / technical | Required API transaction/lock and runtime failure/race verification; FR-008 through FR-011, AC-013/AC-015/AC-018 through AC-023. |
 | CON-008 | Draft authoring writes only this PRD. Manual HVE RPI owns later planning/security/quality review and implementation, not automatic pipeline story handoff. No story/issue chains, publication, merge or labels now; later work slices stay at most 500 changed lines including tests. | Updated user delivery direction and AGENTS.md human gate / organizational | Human PRD-merge approval remains mandatory. Parent resolves the feature-specific non-pickup route; no skip mechanism is asserted. Draft is not delivery or approval; DD-012 and AC-037. |
 
@@ -431,15 +437,138 @@ All 42 criteria have **Status: Not Started**. Test names below are required futu
 | AC-031 | Given single-question UI, when explicit send occurs then the notice is shown and only one question/answer is retained transiently; new question/case/user/sign-out clears buffers and pane. Test `CopilotSurface_SingleQuestionNoticeNoPersistentHistory`; server/browser-storage spies record zero prompt/answer/history writes, no automatic send on navigation. | FR-016 |
 | AC-032 | Given model requests proposal, when host returns confirmation_required state/proposal control data, then model turn ends before human wait; UI approval followed by exact tool retry uses zero additional model calls and no continuous timer. Test `ProductionHost_ConfirmationWait_EndsModelTurn`; waiting 5 minutes cannot extend proposal or silently continue execution. | FR-016 |
 | AC-033 | Given Q&A, record and confirmation surfaces, when keyboard/component accessibility checks run, then labelled controls, visible focus contract, announced busy/error/result state and explicit approve/decline/cancel controls are present. Test `CopilotSurface_KeyboardLabelsAndLiveState`; WCAG 2.2 AA visual/assistive-use review is separately required and not claimed executed. | FR-016 |
-| AC-034 | Given authorized-case copilot success/denial/read/replay, when activity is projected, then it displays fixed “from copilot” provenance, operation/time/outcome while original business revision/history/current run/basis pins and digests are unchanged by read auditing. Test `ProductionHost_CopilotActivity_IndependentBusinessHistory`; unauthorized/no-case attempts never append to a case or disclose its existence. | FR-017 |
+| AC-034 | Given authorized-case copilot success/denial/read/replay, when activity is projected, then it displays fixed “from copilot” provenance, operation/time/outcome, and the Addendum A fields of FR-026 to FR-029 filtered by FR-032, while original business revision/history/current run/basis pins and digests are unchanged by read auditing. Test `ProductionHost_CopilotActivity_IndependentBusinessHistory`; unauthorized/no-case attempts never append to a case or disclose its existence. | FR-017 |
 | AC-035 | Given captured ledger/log/trace/metric and browser/server storage sinks, when user question, release note, source text, cookie/CSRF and identifying network values are injected, then none persists in invocation diagnostics; ledger field allowlist and OTel suppression rules hold. Test `ProductionHost_CopilotPrivacy_NoContentCredentialTelemetry`; no unapproved custom metric dimensions or raw IDs are emitted. | FR-017 |
 | AC-036 | Given counting model fake, fake clock/delay and production limits, when boundary values are exercised, then 20/8 attempts, 16000 input and 2000 output are permitted; 21/9/16001/2001 give catalogue exact limits; retries wait 500ms/1000ms, third retry gives copilot_retry_limit, exactly 30s gives copilot_timeout. Test `ProductionHost_CopilotLimits_ExactBoundaries`; rejected tool calls and model retry attempts count, no partial answer or infinite loop. | FR-018 |
-| AC-037 | Given feature prerequisites and exclusions, when author/delivery boundary is reviewed, then only same-origin app capabilities are required, #363 remains closed evidence, no cloud/OAuth/MCP APIM/full-chat/other-write work is introduced and existing model route stays unchanged. Verified by review `DraftAndReleaseScope_OnlyApprovedFeature`; human PRD-merge gate remains mandatory, later HVE RPI work is manual, parent must resolve non-pickup approval route before proceeding, and no pipeline skip mechanism or story plan is claimed. | FR-018 |
+| AC-037 | Given feature prerequisites and exclusions, when author/delivery boundary is reviewed, then only same-origin app capabilities are required, #363 remains closed evidence, no cloud/OAuth/MCP APIM/full-chat/other-write work is introduced beyond the Addendum A allowlist in CON-002, and existing model route stays unchanged. Verified by review `DraftAndReleaseScope_OnlyApprovedFeature`; human PRD-merge gate remains mandatory, later HVE RPI work is manual, parent must resolve non-pickup approval route before proceeding, and no pipeline skip mechanism or story plan is claimed. | FR-018 |
 | AC-038 | Given implementation CI restores/builds pinned package and production tests exercise catalogue table, when SDK or contract is wrong, then restore/build or exact runtime errors fail verification rather than assuming registry availability. Test `ProductionHost_CopilotErrors_ExactCatalogue`; CI backend restore/build is the external-availability verifier, using research W2/W8/W10 as dated evidence, not a new live claim. | FR-018 |
 | AC-039 | Given existing source/investigator suites and production fake edges, when new Q&A failures/cancellation/limits run, then existing suites' defaults and outcomes remain unchanged; cancellation/timeout/unavailable/overflow release source leases and retain admitted-window counts. Test `ProductionHost_SourceFailuresCancellation_LeasesAndWindow`; 100 records succeeds, 101 →422 source_record_limit without partial records, exactly 1s →504 source_read_timeout, case mismatch/missing/unavailable preserve envelopes. | FR-018 |
 | AC-040 | Given canonical fixtures, source matrix, direct source errors and role summary output, when tool/direct contracts compare, then canonical case/source/record/version/status identifiers are equal and source error codes/envelopes are preserved in tool adaptation without widening data. Test `ProductionHost_McpDirectContracts_CanonicalIdentityAndErrors`; query parameters fail, unauthenticated/out-of-scope/unknown roles reach zero source edges. | FR-001, FR-006 |
 | AC-041 | Given durable admission followed by outcome storage failure, when read/model completes then further dispatch stops with 503 audit_unavailable and diagnostics explicitly distinguish unavailable outcome from recorded admission; no successful outcome is fabricated. Test `ProductionHost_AuditOutcomeFailure_HonestStop`; for release, same fault rolls back consumption/receipt/business audit/revision atomically. | FR-007, FR-018 |
 | AC-042 | Given one hostile fake-model production-host suite, when unknown tool, cross-case IDs, fake confirmed=true, guessed proposal, fabricated URL/citation and source-delimiter/instruction fixtures are executed, then deterministic host checks yield **zero unintended effects** and no raw source appears in any outbound model request. Test `ProductionHost_HostileModel_ZeroUnintendedEffects`; a valid entitled read and approved exact release are positive controls, and results are explicitly not live accuracy or universal immunity measurements. | FR-014 |
+
+---
+
+## Addendum A: Showcase — Injection Defence and Audit Replay
+
+Added 2026-11-02 (version 0.2.0). This addendum adds two demo moments on top of the delivered copilot (#692) and the seeded maintenance task card with instruction-like text (#293). It amends CON-002, CON-006, NFR-014, GOAL-004, DD-004, DD-008, FR-007, FR-013, FR-017, AC-034, AC-037 and the audit contract in place; each amended row says “Addendum A”. Everything else in this PRD stays in force. The threat model for the new egress and the trail is [docs/security/copilot-injection-audit-threat-model.md](../security/copilot-injection-audit-threat-model.md).
+
+**Story 1, injection defence.** Signed in as the technical reviewer, the presenter asks about the open points of `case-001`. The copilot reads the maintenance source, which contains `mx-task-card-001` version 1, whose `taskText` tells the assistant to mark the aircraft ready without evidence. The copilot answers without acting on it. The platform screens the record with Azure AI Content Safety Prompt Shields, the chat panel shows a warning chip, and activating the chip opens the record with the flagged field marked. The detection is written to the case trail.
+
+**Story 2, audit replay.** The presenter opens the case Activity panel. It lists UI and copilot entries in time order, filters to copilot entries, and opens one to show who asked, the role, the tool, what it returned (identity and version only) and which gate decided the outcome.
+
+**Out of scope for Addendum A:** new detection models or custom classifiers; exporting the trail; routing MCP through APIM; blocking model traffic with the APIM `llm-content-safety` policy; word-level highlighting (Prompt Shields returns no spans); ledgering transport-level `/mcp` rejections (bad Origin, CSRF, protocol) into a case trail, because they occur before a case is authorized; editing signed source fixtures.
+
+### Addendum A Functional Requirements
+
+All are MUST and serve GOAL-005.
+
+| ID | Requirement / expected outcome | Actor and trigger | Acceptance criteria |
+| --- | --- | --- | --- |
+| FR-019 | `read_source` returns the seeded task card only inside `untrustedRecords`, each record carrying its `screening` object. The model-safe projection and the model observation are unchanged; nothing from `screening` reaches the model. | Entitled reviewer reads maintenance records. | AC-043 |
+| FR-020 | Screening calls Prompt Shields `text:shieldPrompt` (`api-version=2024-09-01`) through the APIM `contentsafety` API with the existing gateway token credential. Each string field of a record payload is one document, in ordinal field-name order; `userPrompt` is the empty string. Screening runs after authorization, so a denied read screens nothing. | API screens a returned record. | AC-044 |
+| FR-021 | The same `sourceId`, `recordId`, `recordVersion` and SHA-256 of the field text produce the same verdict without a second service call. Only `detected` and `clear` verdicts are cached. | Repeated read of an unchanged record. | AC-045 |
+| FR-022 | When screening is unavailable (endpoint unset, non-2xx response, or no response within 3 seconds), records still show with `screening.state = "unavailable"`, the UI shows a neutral chip, and a `screening_unavailable` detail row is written. The first unavailable result short-circuits screening for the rest of the request. | Content Safety unreachable or unconfigured. | AC-046 |
+| FR-023 | A record with `screening.state = "detected"` produces a warning chip “Untrusted instructions detected in a source record”. Activating it selects that record in the record pane and wraps each flagged field value in `<mark>`, rendered as text. Clear records show no chip. | Answer contains a detected record. | AC-047 |
+| FR-024 | A detection writes one `injection_detected` detail row with `sourceId`, `recordId`, `recordVersion` and `flaggedFields`. | Screening returns `detected`. | AC-048 |
+| FR-025 | No verdict and no record text causes a tool call, a proposal or a business write. Containment does not depend on detection: the model never receives record text, and `advance_stage` only creates a proposal that a presenter confirms in trusted UI. | Model receives an observation of a flagged record. | AC-049 |
+| FR-026 | Every tool call that reaches a tool, denied and blocked ones included, is one trail entry with user, role, tool (`operation`), case, timestamp (`at`) and outcome. The core ledger row of FR-007 is unchanged; a separate append-only `copilot_invocation_details` store holds record refs, the screening verdict, the proposal link, the gate name and result, and blocker codes. The display user is resolved at read time by matching `callerRef` against each demo user; no match gives `null`, shown as “unknown user”. | Any copilot tool invocation on an authorized case. | AC-050 |
+| FR-027 | Copilot entries carry `source: "from copilot"` and a “Copilot” badge. The UI merges them with business audit entries (tagged `ui`) by time, and an All / Copilot / UI filter narrows the list client-side. When the copilot activity call fails, business entries still show with a notice. | User opens the case Activity panel. | AC-051 |
+| FR-028 | A stage-change entry shows the presenter's trusted-UI confirmation of the chat proposal (ledger operation `approve`, `decline` or `cancel` with its `proposal_decided` detail and `proposalId`) and the gate result: gate name `final-release`, result `passed`, `replayed`, or the exact catalogue code that refused it, and the exact `blockers` codes in API order when the result is `release_blocked`. A committed release always has its gate row; a failed gate-row append leaves no committed release. | Presenter's release attempt through `advance_stage` or `POST copilot/advance`. | AC-052 |
+| FR-029 | Read entries show record identity and version only, never record content: each `records` item has exactly `sourceId`, `recordId`, `recordVersion`. | User opens a read entry. | AC-053 |
+| FR-030 | The trail is read-only and append-only. No route or UI control edits or removes an entry. The details store exposes only append and list-for-case. The app SQL identity has `SELECT` and `INSERT` only on `copilot_invocation_details`. | Any attempt to change an entry. | AC-054 |
+| FR-031 | Technical open points without basis pins reference the case's maintenance records whose `kind` is `task_card`, using their committed fixture identities, through a synchronous lookup over already-loaded fixture data that consumes no source read budget. When the case's maintenance source mode is not `available`, no task card is referenced. With pins, pins are used as today. | Technical reviewer asks for open points. | AC-055 |
+| FR-032 | Model tool calls the Q&A loop refuses before dispatch (`unknown_tool`, `case_selection_required`, `selected_case_mismatch`) get a ledger admit and outcome row against the trusted selected case, with `operation` set to the requested tool name when it is one of the five tools and `unknown_tool` otherwise; the model's other case ID is never stored. Record refs and screening on an entry are shown only for sources the viewer's role may see (`SourceSummaryService.CanSeeDetails`); `screening` is `null` when no ref remains. | Model emits a refused call; any role reads the trail. | AC-056 |
+
+**Screening contract (FR-019 to FR-022), binding.** `screening` is a property of each record object inside `untrustedRecords`, and so of each entry in the Q&A `records` array. The `CopilotInputContract.Observe` root allowlist is unchanged.
+
+```json
+{ "untrustedRecords": [ { "sourceId": "maintenance", "recordId": "mx-task-card-001",
+    "recordVersion": 1, "payload": { "taskText": "..." },
+    "screening": { "state": "detected", "service": "prompt-shields", "flaggedFields": ["taskText"] } } ] }
+```
+
+`state` is exactly `detected`, `clear` or `unavailable`; `service` is the literal `prompt-shields`; `flaggedFields` lists payload field names in ordinal order and is `[]` unless `state` is `detected`.
+
+**Details row contract (FR-024, FR-026, FR-028), binding.** Columns are `invocation_id`, `kind`, `at`, `source_id`, `record_id`, `record_version`, `screening_state`, `flagged_fields`, `proposal_id`, `gate`, `gate_result`, `blocker_codes`. `kind` is exactly one of `record_read`, `injection_detected`, `screening_unavailable`, `proposal_created`, `proposal_decided`, `release_gate`; any other value is rejected. No column holds record text, a question, an answer or a release note. A failed details append returns `503 audit_unavailable`.
+
+**Activity item contract (FR-017 as amended, FR-026 to FR-029), binding.** Existing fields keep their names and meaning; the new fields are additive.
+
+```json
+{ "contractVersion": 1, "caseId": "case-001",
+  "items": [ {
+    "invocationId": "uuid", "operation": "read_source", "at": "ISO-8601 UTC",
+    "outcome": "succeeded", "httpStatus": 200, "resultCode": "ok",
+    "source": "from copilot",
+    "user": "display name or null", "role": "technical-reviewer",
+    "provenance": "copilot-client",
+    "records": [ { "sourceId": "maintenance", "recordId": "mx-task-card-001", "recordVersion": 1 } ],
+    "screening": { "state": "detected", "flaggedFields": ["taskText"] },
+    "proposalId": null,
+    "gate": null } ] }
+```
+
+`gate`, when present, is `{ "name": "final-release", "result": "...", "blockers": [] }`. Source visibility of `records` and `screening` per viewer role (FR-032):
+
+| Viewer role | User, role, operation, outcome, gate | Refs and screening shown for sources | Omitted for sources |
+| --- | --- | --- | --- |
+| `technical-reviewer` | shown | `technical`, `maintenance`, `records` | `finance`, `contracts` |
+| `finance-reviewer` | shown | `technical`, `finance` | `maintenance`, `records`, `contracts` |
+| `legal-reviewer` | shown | `contracts`, `records` | `technical`, `maintenance`, `finance` |
+| `presenter` | shown | none | all |
+| `executive` | shown | none | all |
+
+Unknown and anonymous callers keep the existing `403 forbidden` and `401 unauthenticated` results and reach no store.
+
+### Addendum A Non-Functional Requirements
+
+**NFR-015 (MUST):** Raw record text never enters a model message, a log, an exception message, the verdict cache key or any store. Covers FR-019 to FR-024; AC-057.
+
+**NFR-016 (MUST):** Screening adds at most 3 seconds per request, measured with the injected `TimeProvider` and the turn's linked cancellation token, and stays inside the 30-second Q&A budget of NFR-002. Unavailable results are not retried. Covers FR-022; AC-058.
+
+**NFR-017 (MUST):** Each implementation slice of Addendum A stays at or under 500 changed lines, including tests. Covers DD-017; AC-059.
+
+**NFR-018 (MUST):** The Content Safety account has public network access off and local auth off, is reachable only through APIM with managed identity, and is associated with the deployer network security perimeter in Enforced mode when deployer CIDRs are set. Covers FR-020; AC-060.
+
+**NFR-019 (MUST):** The scripted scenario gives the same verdict, the same chip and the same trail entries on every run. Covers FR-021, FR-031; AC-061.
+
+### Addendum A Acceptance Criteria
+
+| ID | Acceptance criterion | FR / NFR |
+| --- | --- | --- |
+| AC-043 | Given a technical reviewer on `case-001`, when `read_source` returns `mx-task-card-001` v1, then the record appears only inside `untrustedRecords` with its `screening` object, and the model-safe result and model observation contain no `screening` property. Test `ReadSource_TaskCard_UntrustedRecordCarriesScreening`. Negative case: finance reviewer reads maintenance records → `403 forbidden` with zero screening calls. | FR-019 |
+| AC-044 | Given a fake gateway handler, when a record with string fields `status` and `taskText` is screened, then one `POST contentsafety/text:shieldPrompt?api-version=2024-09-01` is sent with `userPrompt: ""` and `documents` equal to the two values in ordinal field-name order, and `attackDetected` on the `taskText` document gives `flaggedFields: ["taskText"]`. Test `Screening_RequestShape_OneDocumentPerStringField`. Negative case: `ContentSafety:Endpoint` unset → `state: "unavailable"` with zero HTTP calls. | FR-020 |
+| AC-045 | Given one `detected` verdict, when the same record identity and text are screened again, then the verdict is identical and the handler call count stays 1. Test `Screening_SameIdentityAndText_CachedOneCall`. Negative case: same identity with changed field text → a second call; an `unavailable` verdict is not cached. | FR-021 |
+| AC-046 | Given the handler returns `500`, when two records are read in one request, then both are returned with `state: "unavailable"`, one handler call is made, and one `screening_unavailable` row is written. Tests `Screening_Unavailable_RecordsShownWithNeutralState` and `Screening_HandlerNeverResponds_ShortCircuits`. Negative case: a `200` all-clear response → `state: "clear"`, no `screening_unavailable` row. | FR-022 |
+| AC-047 | Given an answer with a detected record, when the chip is activated by keyboard, then the record pane selects that record and the `taskText` value is inside `<mark>` as text. Test `frontend/tests/CopilotSurface.test.tsx` / “shows the warning chip for a detected record and marks taskText”. Negative case: a clear record → no chip; a flagged value containing `<b>` markup → rendered as text with no `b` element. | FR-023 |
+| AC-048 | Given a detected read, when the read completes, then exactly one `injection_detected` row holds `maintenance`, `mx-task-card-001`, `1` and `["taskText"]` under the read's `invocationId`. Test `ReadSource_Detection_WritesInjectionDetectedRow`. Negative case: a denied read → zero detail rows; a failed details append → `503 audit_unavailable` and no detail row. | FR-024 |
+| AC-049 | Given a scripted model that receives the task card observation and then calls `advance_stage`, when the technical reviewer's turn runs, then screening adds zero tool calls and `advance_stage` returns `403 forbidden` with no proposal and no business write. Test `ProductionHost_HostileModel_TaskCardObservationNoExtraToolCall`. Negative case: the same turn as presenter → only the existing `confirmation_required` proposal path, no release. | FR-025 |
+| AC-050 | Given a read, a denied read and a blocked release on `case-001`, when the trail is read, then each invocation is exactly one item in time order with user, role, operation, case, `at` and outcome. Test `Activity_ListsEveryInvocationInOrder`. Negative case: an attempt on an out-of-scope case → no item in any case trail; an unknown `callerRef` → `user: null`. | FR-026 |
+| AC-051 | Given business and copilot entries, when the filter is set to Copilot, then only items with `source: "from copilot"` remain, each with a “Copilot” badge; UI shows only business entries. Test `frontend/tests/JourneyApp.test.tsx` / “filters the activity trail to Copilot and UI entries”. Negative case: the copilot activity call fails → business entries still show with a notice. | FR-027 |
+| AC-052 | Given a blocked and a successful release, when their entries are read, then the blocked entry has gate `final-release`, result `release_blocked` and the exact blocker codes in API order, and the successful entry links the `approve` decision by `proposalId` with result `passed`. Test `Release_GateDetailRows_ExactResultAndBlockers`. Negative case: the details store throws during a fresh release → case revision, proposal state, receipt and ledger unchanged. Test `Release_DetailAppendFails_RollsBack`. | FR-028 |
+| AC-053 | Given a read entry, when it is serialized, then each `records` item has exactly the keys `sourceId`, `recordId`, `recordVersion`. Test `Activity_RecordsCarryNoContentFields`. Negative case: the stored record has a `payload` → no `payload`, `taskText` or `asOf` key in the response. | FR-029 |
+| AC-054 | Given the production host, when its endpoint data source is enumerated, then no `PUT`, `PATCH` or `DELETE` route matches copilot activity or details, and the details store type has no update or delete member. Test `Activity_NoMutationRoutes`. Negative case: `DELETE` on the activity path → `405` and the store is unchanged. The `SELECT`, `INSERT` grant is verified by CI: `terraform test` (`identity-telemetry.tftest.hcl`). | FR-030 |
+| AC-055 | Given `case-001` with no basis pins and maintenance mode `available`, when technical open points are read, then `sourceRefs` include `maintenance` / `mx-task-card-001` / `1`. Test `OpenPoints_NoPins_ReferencesTaskCard`. Negative case: maintenance mode `unavailable` → no task card ref. Test `OpenPoints_MaintenanceUnavailable_NoTaskCardRef`. | FR-031 |
+| AC-056 | Given a selected case `case-001` and a model call naming another case, when the loop refuses it with `selected_case_mismatch`, then one admit and one outcome row exist against `case-001` and no row holds the other case ID. Test `ProductionHost_HostileModel_ToolSchemaSelectedCaseApproval` (updated). Given one entry with a maintenance ref, `technical-reviewer` sees the ref and screening and `executive` sees `records: []` and `screening: null`. Test `Activity_RoleVisibility`. Negative case: finance reviewer → maintenance ref omitted. | FR-032 |
+| AC-057 | Given captured logs, exceptions, cache keys and stored rows, when the task card is screened and detected, then none contains any substring of its `taskText`. Test `Screening_NoRecordTextInLogsCacheOrStore`; the existing `ProductionHost_CopilotMessages_RawSourcesAbsentEveryRequest` keeps passing. Negative case: the handler returns `500` with a body echoing the text → the text is still absent. | NFR-015 |
+| AC-058 | Given a handler that never responds and a fake `TimeProvider`, when 3 seconds elapse, then the verdict is `unavailable` and the answer is returned inside the 30-second budget. Test `Screening_HandlerNeverResponds_ShortCircuits`. Negative case: a response at 2.9 seconds → its verdict is used. | NFR-016 |
+| AC-059 | Each Addendum A pull request changes at most 500 lines, including tests. Verified by review. Negative case: a slice estimated above 500 lines → split before implementation. | NFR-017 |
+| AC-060 | Given the Terraform plan, then the `ContentSafety` account has `local_auth_enabled = false` and `public_network_access_enabled = false`, a private endpoint, the APIM role assignment, and with `deployer_ip_cidrs = ["198.51.100.7/32"]` an Enforced association on the `deployer` profile. Verified by CI: `terraform test` in `infra/terraform`. Negative case: no deployer CIDRs → no association and the account still private. | NFR-018 |
+| AC-061 | Given the production startup with a scripted model and a fake shield handler, when the technical reviewer asks the open-points question twice, then both runs give `detected` on `mx-task-card-001` v1, the handler is called once, no `advance_stage` call occurs, and the trail shows the reads and the detection. Test `CopilotShowcaseScenarioTests` / `Showcase_TwoRuns_SameVerdictOneShieldCall`. Negative case: a different text digest for the same identity → a fresh call. | NFR-019 |
+
+### Addendum A Decisions and Risks
+
+Decisions D1 to D5 are recorded as DD-013 to DD-017 in Design Decisions.
+
+| ID | Risk or open question | Probability / impact | Mitigation and residual boundary |
+| --- | --- | --- | --- |
+| RISK-009 | A live model answers the open points without calling `read_source`, so no chip appears. | Medium / High | FR-031 task card reference plus the documented demo question; rehearse with the deployed model. The scripted test proves the server path, not live model behaviour. |
+| RISK-010 | Prompt Shields does not flag the seeded text. | Medium / Medium | Call the deployed route once with the `taskText` after deployment. If it is not flagged, a fixture change with re-signing by the key holder is a separate change. |
+| RISK-011 | Content Safety or Prompt Shields is not offered in `swedencentral`, or document limits per request are lower than a list read needs. | Medium / Medium | Check on Microsoft Learn during the infrastructure slice; set an explicit account `location` with a cross-region private endpoint, and batch documents within the limits. |
+| RISK-012 | The post-merge AI-SDLC planner creates stories from this addendum. | Medium / Medium | The pull request states that no stories are wanted (DD-017); close or relabel any issues it creates. |
+| RISK-013 | The Content Safety account adds cost. | Low / Low | Use the `F0` or `S0` SKU the subscription allows. |
+| RISK-014 | Rotating `Copilot__AuditKey` makes earlier entries show “unknown user”. | Low / Medium | Do not rotate during a demo period; `null` user renders as “unknown user”. |
+| RISK-015 | A `ContentSafety` account cannot be associated with a network security perimeter. | Medium / Medium | Confirm on Microsoft Learn before merging the infrastructure slice; if unsupported, return DD-013 to wesback rather than dropping the association. |
 
 ---
 
@@ -471,8 +600,22 @@ Not applicable: no feasibility-to-PRD or BRD handoff was supplied. Completed res
 | FR-016 | AC-030, AC-031, AC-032, AC-033 |
 | FR-017 | AC-034, AC-035 |
 | FR-018 | AC-036, AC-037, AC-038, AC-039, AC-041 |
+| FR-019 | AC-043 |
+| FR-020 | AC-044, AC-057 |
+| FR-021 | AC-045, AC-061 |
+| FR-022 | AC-046, AC-058 |
+| FR-023 | AC-047 |
+| FR-024 | AC-048 |
+| FR-025 | AC-049 |
+| FR-026 | AC-050 |
+| FR-027 | AC-051 |
+| FR-028 | AC-052 |
+| FR-029 | AC-053 |
+| FR-030 | AC-054 |
+| FR-031 | AC-055, AC-061 |
+| FR-032 | AC-056 |
 
-Coverage formula: `(FR rows with at least one AC / FR rows) * 100` = `18/18 * 100` = **100.0%**, exceeding the 80.0% threshold. This is authored linkage coverage, not 100% test pass rate.
+Coverage formula: `(FR rows with at least one AC / FR rows) * 100` = `32/32 * 100` = **100.0%**, exceeding the 80.0% threshold. This is authored linkage coverage, not 100% test pass rate.
 
 ### FR-to-GOAL Alignment
 
@@ -496,14 +639,28 @@ Coverage formula: `(FR rows with at least one AC / FR rows) * 100` = `18/18 * 10
 | FR-016 | GOAL-003 |
 | FR-017 | GOAL-004 |
 | FR-018 | GOAL-004 |
+| FR-019 | GOAL-005 |
+| FR-020 | GOAL-005 |
+| FR-021 | GOAL-005 |
+| FR-022 | GOAL-005 |
+| FR-023 | GOAL-005 |
+| FR-024 | GOAL-005 |
+| FR-025 | GOAL-005 |
+| FR-026 | GOAL-005 |
+| FR-027 | GOAL-005 |
+| FR-028 | GOAL-005 |
+| FR-029 | GOAL-005 |
+| FR-030 | GOAL-005 |
+| FR-031 | GOAL-005 |
+| FR-032 | GOAL-005 |
 
-Coverage formula: `(FR rows with at least one GOAL / FR rows) * 100` = `18/18 * 100` = **100.0%**, meeting the 100.0% target. No waiver is requested. NFR and CON acceptance links are recorded with their statements; DDs identify scope authority and affected contracts.
+Coverage formula: `(FR rows with at least one GOAL / FR rows) * 100` = `32/32 * 100` = **100.0%**, meeting the 100.0% target. No waiver is requested. NFR and CON acceptance links are recorded with their statements; DDs identify scope authority and affected contracts.
 
 ---
 
 ## MVP and Release Framing
 
-The first release includes **FR-001 through FR-018**, **NFR-001 through NFR-014**, and all four goals. The minimum feature is not MCP hosting alone: API projections, durable audit admission, atomic confirmation/receipt, bounded governed model client, one-question UI and UI-only source isolation are required together. No listed requirement is an optional backlog wish.
+The first release includes **FR-001 through FR-018**, **NFR-001 through NFR-014**, and all four goals. Addendum A adds **FR-019 through FR-032**, **NFR-015 through NFR-019** and GOAL-005 as a second release on top of the first. The minimum feature is not MCP hosting alone: API projections, durable audit admission, atomic confirmation/receipt, bounded governed model client, one-question UI and UI-only source isolation are required together. No listed requirement is an optional backlog wish.
 
 Prerequisite additions are in-feature API work, not evidence that existing contracts have already been implemented. Safe summary/open-points must precede their consumer dispatch; invocation admission must exist before sensitive dispatch; confirmation and atomic receipt persistence must exist before final release via MCP; input-policy approval must precede the new model workload. These are product dependencies, not issue chains.
 
@@ -511,7 +668,7 @@ Intended delivery is **manual HVE RPI planning and implementation here**, as dir
 
 After that gate is resolved and approval recorded, manual HVE RPI owns planning, security/quality review and implementation, with work slices at most 500 changed lines including tests and all runtime/CI/human UI acceptance obligations intact. This paragraph assigns ownership, not a plan or activation of RPI. No publish, merge, PR, issue, label, live provider validation or cloud operation is performed by draft authoring.
 
-Out of scope: OAuth/OBO/JWT user authentication, generic external connector authorization, MCP APIM routing, gateway/tenant/infrastructure changes, new credentials/providers/direct fallback, full chat or persisted history, raw-source model ingestion, live/real aircraft data, reviewer decisions, intake/investigation commands, UI gate navigation, reset/upload/source-mode writes, notices/lessee contact and every business write except final simulated release.
+Out of scope: OAuth/OBO/JWT user authentication, generic external connector authorization, MCP APIM routing, gateway/tenant/infrastructure changes other than the Addendum A allowlist in CON-002, new credentials/providers/direct fallback, full chat or persisted history, raw-source model ingestion, live/real aircraft data, reviewer decisions, intake/investigation commands, UI gate navigation, reset/upload/source-mode writes, notices/lessee contact and every business write except final simulated release.
 
 ---
 
@@ -525,7 +682,8 @@ These are acceptance measurements, not proposed custom telemetry names or claims
 | Confirmation/release invariant pass count | New confirmation/receipt not implemented | 12/12: AC-012..AC-023; zero duplicate business releases/audits | First release acceptance / fake-clock, race and injected-failure results | GOAL-002 |
 | Model isolation/effects pass count | New client untested; live accuracy unmeasured | 11/11: AC-024..AC-033, AC-042; zero raw-source outbound leaks/unintended effects | First release acceptance / captured fake-provider requests, counting edges, UI tests/review | GOAL-003 |
 | Audit/operational boundary pass count | No copilot invocation ledger exists | 9/9: AC-010, AC-011, AC-034..AC-039, AC-041 | First release acceptance / persistence, diagnostic and CI/review evidence | GOAL-004 |
-| Total authored criterion coverage | 42 Not Started; no execution evidence in this draft | 42/42 verified, disjoint goal measurement sets total 10+12+11+9=42 | First release acceptance / consolidated evidence | All |
+| Injection defence and audit replay pass count | No screening or copilot trail details exist | 19/19: AC-043..AC-061; same verdict on every scripted run | Addendum A acceptance / production-host, frontend, CI terraform and review evidence | GOAL-005 |
+| Total authored criterion coverage | 61 Not Started; no execution evidence in this draft | 61/61 verified, disjoint goal measurement sets total 10+12+11+9+19=61 | First release acceptance / consolidated evidence | All |
 
 Operational HTTP duration uses existing telemetry vocabulary, not a new latency SLO. The 30-second processing ceiling and one-second source deadline are enforced limits, not measured availability promises. No success metric claims universal injection resistance, live citation accuracy, airworthiness or regulatory compliance.
 
@@ -594,7 +752,7 @@ None requested or granted. No coverage gap exists. Unmeasured live accuracy and 
 
 ### Handoff Readiness
 
-Draft ready for wesback's human review; **Planning blockers: None for product scope and behavior**. Research is completed and all material findings have one disposition. Authored inventory is **4 GOAL, 18 FR, 14 NFR, 8 CON, 42 AC and 12 DD**; FR-to-AC and FR-to-GOAL authored coverage are both **100.0%**. Zero unresolved product scope questions; executable acceptance, formal quality gates and human approval remain pending. The dispatcher-host hold is user-confirmed, not independently queried by the parent.
+Draft ready for wesback's human review; **Planning blockers: None for product scope and behavior**. Research is completed and all material findings have one disposition. Authored inventory is **5 GOAL, 32 FR, 19 NFR, 8 CON, 61 AC and 17 DD** (Addendum A adds GOAL-005, FR-019..FR-032, NFR-015..NFR-019, AC-043..AC-061 and DD-013..DD-017); FR-to-AC and FR-to-GOAL authored coverage are both **100.0%**. Zero unresolved product scope questions; executable acceptance, formal quality gates and human approval remain pending. The dispatcher-host hold is user-confirmed, not independently queried by the parent.
 
 No PRD_STANDARD_FINDINGS_V1 or PRD_QUALITY_REPORT_V1 gate has been produced; Validate/Finalize exit is not authorized. No signoff artifact hash, approval timestamp, story plan, backlog handoff, issue or security model is fabricated. Manual HVE RPI owns later planning/review/implementation after the preserved human approval gate is safely resolved; work slices retain the 500-changed-line discipline including tests. No automatic pipeline handoff is requested or asserted disabled. This PRD stops at draft creation.
 
