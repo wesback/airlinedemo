@@ -593,7 +593,16 @@ button:disabled { cursor: not-allowed; }
 .av-copilot-record { border: 1px solid var(--av-line); border-radius: var(--av-radius-s); padding: 10px 12px; background: var(--av-surface-2); }
 .av-copilot-record.is-selected { border-color: var(--av-ai); }
 .av-copilot-record-meta { font-size: 12px; font-weight: 600; color: var(--av-text-2); }
-.av-copilot-record pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; max-height: 240px; overflow: auto; }
+.av-copilot-payload { margin: 6px 0 0; font-size: 12.5px; max-height: 240px; overflow: auto; display: grid; gap: 4px; }
+.av-copilot-payload dt { font-weight: 600; color: var(--av-text-2); }
+.av-copilot-payload dd { margin: 0 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.av-copilot-payload mark { background: var(--av-alert-soft); color: var(--av-alert); border-radius: 2px; padding: 0 2px; }
+.av-copilot-chips { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.av-chip { display: inline-block; font: inherit; font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--av-line); }
+.av-chip-warning { background: var(--av-alert-soft); color: var(--av-alert); border-color: var(--av-alert); cursor: pointer; }
+.av-chip-warning[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--av-alert); }
+.av-chip-neutral { background: var(--av-surface-2); color: var(--av-text-2); }
+.av-chip-detail { font-weight: 400; }
 .av-copilot-confirmation { margin-top: 12px; border: 1px solid var(--av-line-strong); border-radius: var(--av-radius); padding: 14px; display: grid; gap: 10px; }
 .av-copilot-tuple { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 13.5px; }
 .av-copilot-tuple dt { font-weight: 700; color: var(--av-text-2); }
