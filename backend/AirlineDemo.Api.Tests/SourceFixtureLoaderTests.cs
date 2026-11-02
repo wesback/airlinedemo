@@ -371,9 +371,11 @@ public sealed class SourceFixtureLoaderTests
     [Fact]
     public void AC004_signed_fixtures_cover_core_and_three_scenarios_in_every_source()
     {
-        string[] expectedCases = ["case-001", "case-a", "case-b", "case-c"];
+        string[] coreCases = ["case-001", "case-a", "case-b", "case-c"];
         foreach (var source in Sources)
         {
+            // The maintenance fixture also owns the copilot showcase case, which carries one task card.
+            string[] expectedCases = source == "maintenance" ? [.. coreCases, "cp-case-a"] : coreCases;
             var records = CommittedRecords(source);
             Assert.Equal(expectedCases, records.Select(record => record.GetProperty("caseId").GetString()!).Distinct().Order().ToArray()
                 .Select(id => id).OrderBy(id => Array.IndexOf(expectedCases, id)).ToArray());
