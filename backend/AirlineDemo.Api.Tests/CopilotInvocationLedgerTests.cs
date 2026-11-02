@@ -153,6 +153,33 @@ public sealed class CopilotInvocationLedgerTests : IAsyncDisposable
         return (response.StatusCode, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 
+    // Runs one invocation on cp-case-a and appends its detail rows under the invocation id.
+    private async Task<Guid> Invoke(DemoSession session, string operation, Func<CopilotInvocationResult> outcome, params CopilotInvocationDetail[] rows)
+    {
+        await Run(session, operation, "cp-case-a", outcome);
+        var id = Stored()[^1].InvocationId;
+        if (rows.Length > 0)
+            await _factory!.Services.GetRequiredService<ICopilotInvocationDetailStore>().AppendAsync([.. rows.Select(row => row with { InvocationId = id })], CancellationToken.None);
+        return id;
+    }
+
+    private static CopilotInvocationDetail Read(string source, string record, string state, params string[] flagged) =>
+        new(Guid.Empty, "record_read", Start, source, record, 1, state, flagged.Length == 0 ? null : flagged);
+
+    private static object RecordRef(string source, string record) => new { sourceId = source, recordId = record, recordVersion = 1 };
+
+    private static object Item(Guid id, string operation, int second, string outcome, int status, string code, string? user, string role,
+        object[] records, object? screening, Guid? proposalId = null, object? gate = null) => new
+    {
+        invocationId = id, operation, at = Start.AddSeconds(second), outcome, httpStatus = status, resultCode = code, source = "from copilot",
+        user, role, provenance = "copilot-client", records, screening, proposalId, gate,
+    };
+
+    private static string Body(params object[] items) =>
+        JsonSerializer.Serialize(new { contractVersion = 1, caseId = "cp-case-a", items }, JsonSerializerOptions.Web);
+
+    private static CopilotInvocationResult Blocked() => new(Results.StatusCode(409), 409, "release_blocked", CopilotOutcome.Failed);
+
     private IReadOnlyList<CopilotInvocationRecord> Stored() =>
         ((InMemoryCopilotInvocationStore)_factory!.Services.GetRequiredService<ICopilotInvocationStore>()).Records;
 
@@ -256,9 +283,9 @@ public sealed class CopilotInvocationLedgerTests : IAsyncDisposable
         {
             contractVersion = 1, caseId = "cp-case-a", items = new object[]
             {
-                new { invocationId = ids[0], operation = "get_case_summary", at = Start.AddSeconds(1), outcome = "succeeded", httpStatus = 200, resultCode = "ok", source = "from copilot" },
-                new { invocationId = ids[1], operation = "advance_stage", at = Start.AddSeconds(2), outcome = "denied", httpStatus = 403, resultCode = "forbidden", source = "from copilot" },
-                new { invocationId = ids[2], operation = "question", at = Start.AddSeconds(3), outcome = "cancelled", httpStatus = 499, resultCode = "cancelled", source = "from copilot" },
+                Item(ids[0], "get_case_summary", 1, "succeeded", 200, "ok", null, "technical-reviewer", [], null),
+                Item(ids[1], "advance_stage", 2, "denied", 403, "forbidden", null, "technical-reviewer", [], null),
+                Item(ids[2], "question", 3, "cancelled", 499, "cancelled", null, "technical-reviewer", [], null),
             },
         }, JsonSerializerOptions.Web), body);
         Assert.Equal("""{"contractVersion":1,"caseId":"cp-case-b","items":[]}""", (await Get("/api/v1/cases/cp-case-b/copilot/activity", other)).Body);
@@ -313,5 +340,106 @@ public sealed class CopilotInvocationLedgerTests : IAsyncDisposable
             ledger.Outcome(admission, 200, "ok", CopilotOutcome.Succeeded, TestContext.Current.CancellationToken));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
             ledger.Outcome(admission, 500, "raw upstream text", CopilotOutcome.Failed, TestContext.Current.CancellationToken));
+    }
+
+    // AC-050: every invocation in time order with its user, role, records, screening, proposal and gate; no write route.
+    [Fact]
+    public async Task Activity_ListsEveryInvocationInOrder()
+    {
+        Factory();
+        var reviewer = Session("reviewer", "technical-reviewer", "cp-case-a");
+        var stranger = Session("ledger-stranger", "technical-reviewer", "cp-case-a");
+        var presenter = Session("presenter", "presenter", "cp-case-a");
+        var proposal = Guid.NewGuid();
+        var clear = await Invoke(reviewer, "read_source", Ok, Read("maintenance", "mx-cp-a-1", "clear"));
+        var flagged = await Invoke(reviewer, "read_source", Ok, Read("maintenance", "mx-cp-a-task-card-001", "detected", "taskText"),
+            Read("maintenance", "mx-cp-a-task-card-001", "detected", "taskText") with { Kind = "injection_detected" });
+        var denied = await Invoke(stranger, "read_source", Forbidden);
+        var gate = await Invoke(presenter, "advance_stage", Blocked, new CopilotInvocationDetail(Guid.Empty, "release_gate", Start, ProposalId: proposal,
+            Gate: "final-release", GateResult: "release_blocked", BlockerCodes: ["reserve_not_approved", "obligations_not_signed_off"]));
+
+        Assert.Equal(Body(
+            Item(clear, "read_source", 1, "succeeded", 200, "ok", "Technical reviewer", "technical-reviewer", [RecordRef("maintenance", "mx-cp-a-1")],
+                new { state = "clear", flaggedFields = Array.Empty<string>() }),
+            Item(flagged, "read_source", 2, "succeeded", 200, "ok", "Technical reviewer", "technical-reviewer", [RecordRef("maintenance", "mx-cp-a-task-card-001")],
+                new { state = "detected", flaggedFields = new[] { "taskText" } }),
+            Item(denied, "read_source", 3, "denied", 403, "forbidden", null, "technical-reviewer", [], null),
+            Item(gate, "advance_stage", 4, "failed", 409, "release_blocked", "Demo presenter", "presenter", [], null, proposal,
+                new { name = "final-release", result = "release_blocked", blockers = new[] { "reserve_not_approved", "obligations_not_signed_off" } })),
+            (await Get("/api/v1/cases/cp-case-a/copilot/activity", reviewer)).Body);
+
+        var methods = _factory!.Services.GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>().Endpoints
+            .OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>().Where(endpoint => endpoint.RoutePattern.RawText!.Contains("activity", StringComparison.Ordinal))
+            .SelectMany(endpoint => endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Routing.HttpMethodMetadata>()!.HttpMethods).Distinct();
+        Assert.Equal(["GET"], methods);
+    }
+
+    // AC-053: a read entry carries record identity and version only.
+    [Fact]
+    public async Task Activity_RecordsCarryNoContentFields()
+    {
+        Factory();
+        var reviewer = Session("reviewer", "technical-reviewer", "cp-case-a");
+        await Invoke(reviewer, "read_source", Ok, Read("technical", "technical-rec-1", "detected", "note"), Read("records", "rec-7", "clear"));
+        var item = JsonNode.Parse((await Get("/api/v1/cases/cp-case-a/copilot/activity", reviewer)).Body)!["items"]![0]!;
+        Assert.Equal(2, item["records"]!.AsArray().Count);
+        Assert.All(item["records"]!.AsArray(), record =>
+            Assert.Equal(["recordId", "recordVersion", "sourceId"], record!.AsObject().Select(field => field.Key).Order(StringComparer.Ordinal)));
+    }
+
+    // AC-056: refs and screening only for the sources the viewer's role may see; screening is null when no ref remains.
+    [Fact]
+    public async Task Activity_RoleVisibility()
+    {
+        Factory();
+        var reviewer = Session("reviewer", "technical-reviewer", "cp-case-a");
+        var executive = Session("exec-1", "executive", "cp-case-a");
+        var maintenance = await Invoke(reviewer, "read_source", Ok, Read("maintenance", "mx-cp-a-1", "clear"));
+        var finance = await Invoke(reviewer, "read_source", Ok, Read("finance", "fin-1", "detected", "memo"));
+        var mixed = await Invoke(reviewer, "read_source", Ok, Read("finance", "fin-2", "detected", "memo"), Read("records", "rec-1", "unavailable"));
+
+        Assert.Equal(Body(
+            Item(maintenance, "read_source", 1, "succeeded", 200, "ok", "Technical reviewer", "technical-reviewer", [RecordRef("maintenance", "mx-cp-a-1")],
+                new { state = "clear", flaggedFields = Array.Empty<string>() }),
+            Item(finance, "read_source", 2, "succeeded", 200, "ok", "Technical reviewer", "technical-reviewer", [], null),
+            Item(mixed, "read_source", 3, "succeeded", 200, "ok", "Technical reviewer", "technical-reviewer", [RecordRef("records", "rec-1")],
+                new { state = "unavailable", flaggedFields = Array.Empty<string>() })),
+            (await Get("/api/v1/cases/cp-case-a/copilot/activity", reviewer)).Body);
+        Assert.Equal(Body(
+            Item(maintenance, "read_source", 1, "succeeded", 200, "ok", "Technical reviewer", "technical-reviewer", [], null),
+            Item(finance, "read_source", 2, "succeeded", 200, "ok", "Technical reviewer", "technical-reviewer", [], null),
+            Item(mixed, "read_source", 3, "succeeded", 200, "ok", "Technical reviewer", "technical-reviewer", [], null)),
+            (await Get("/api/v1/cases/cp-case-a/copilot/activity", executive)).Body);
+    }
+
+    // A denied caller is refused before either audit store is read: with both stores failing, the denial is unchanged.
+    [Fact]
+    public async Task Activity_DeniedRole_ReachesNoStore()
+    {
+        Factory(new FaultingStore(1));
+        Assert.Equal((HttpStatusCode.Forbidden, """{"contractVersion":1,"error":{"code":"forbidden"}}"""),
+            await Get("/api/v1/cases/cp-case-a/copilot/activity", Session("ledger-auditor", "auditor", "cp-case-a")));
+        Assert.Equal(HttpStatusCode.NotFound, (await Get("/api/v1/cases/cp-case-b/copilot/activity", Session("reviewer", "technical-reviewer", "cp-case-a"))).Status);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await Get("/api/v1/cases/cp-case-a/copilot/activity", Session("reviewer", "technical-reviewer", "cp-case-a"))).Status);
+    }
+
+    // The display user resolves through the configured audit key: another ledger instance with the same key resolves the
+    // same user, and a different key yields null.
+    [Fact]
+    public async Task Activity_AuditKeyStable()
+    {
+        Factory();
+        var reviewer = Session("reviewer", "technical-reviewer", "cp-case-a");
+        var store = _factory!.Services.GetRequiredService<ICopilotInvocationStore>();
+        CopilotInvocationLedger Ledger(byte[] key) => new(store, _time, new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["Copilot:AuditKey"] = Convert.ToBase64String(key) }).Build(), NullLogger<CopilotInvocationLedger>.Instance);
+        foreach (var ledger in new[] { Ledger(AuditKey), Ledger(Enumerable.Repeat((byte)9, 32).ToArray()) })
+        {
+            _time.Now = _time.Now.AddSeconds(1);
+            var admission = await ledger.Admit("get_case_summary", CopilotProvenance.CopilotClient, reviewer, "cp-case-a");
+            await ledger.Outcome(admission, 200, "ok", CopilotOutcome.Succeeded, CancellationToken.None);
+        }
+        var items = JsonNode.Parse((await Get("/api/v1/cases/cp-case-a/copilot/activity", reviewer)).Body)!["items"]!.AsArray();
+        Assert.Equal(["Technical reviewer", null], items.Select(item => (string?)item!["user"]));
     }
 }
