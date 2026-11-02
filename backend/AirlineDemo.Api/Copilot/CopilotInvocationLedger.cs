@@ -48,6 +48,7 @@ public sealed class CopilotInvocationLedger(ICopilotInvocationStore store, TimeP
     public static readonly IReadOnlySet<string> Operations = new HashSet<string>(StringComparer.Ordinal)
     {
         "list_my_cases", "get_case_summary", "get_open_points", "read_source", "advance_stage", "question", "approve", "decline", "cancel",
+        "unknown_tool",
     };
     public static readonly IReadOnlySet<string> ResultCodes = new HashSet<string>(StringComparer.Ordinal)
     {

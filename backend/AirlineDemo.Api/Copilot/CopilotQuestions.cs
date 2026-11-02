@@ -188,19 +188,35 @@ public static class CopilotQuestions
             || exception is System.ClientModel.ClientResultException { Status: 408 or 429 }
             || exception is System.ClientModel.ClientResultException { Status: >= 500 and <= 599 };
 
+        // A call refused before dispatch is still one ledger invocation, recorded against the trusted selected case only;
+        // the model's other case ID is never passed to the ledger.
+        private async Task<JsonObject> RefuseAsync(string operation, int status, string code)
+        {
+            var services = http.RequestServices;
+            var session = DemoAuthEndpoints.CurrentSession(http, services.GetRequiredService<DemoSessionStore>());
+            var result = await CopilotInvocation.RunAsync(services.GetRequiredService<ICopilotInvocationLedger>(),
+                services.GetRequiredService<ICaseStateStore>(), session, operation, CopilotProvenance.CopilotClient, selected,
+                _ => Task.FromResult(Fail(status, code)), token);
+            if (result is IStatusCodeHttpResult { StatusCode: StatusCodes.Status503ServiceUnavailable }) throw new TurnFailure(503, "audit_unavailable");
+            return Error(status, code);
+        }
+
         private async Task<(string Name, Dictionary<string, object?> Arguments, JsonObject Observation, JsonNode? Confirmation)> DispatchAsync(
             FunctionCallContent call)
         {
             var (arguments, reject) = RawArguments(call);
             var (known, args) = CopilotMcp.Parse(call.Name, arguments, reject);
-            if (!known) return ("unknown_tool", [], Error(400, "unknown_tool"), null);
+            if (!known) return ("unknown_tool", [], await RefuseAsync("unknown_tool", 400, "unknown_tool"), null);
             var retained = args is null ? new Dictionary<string, object?>() : Retained(args);
             if (args is not null && call.Name != "list_my_cases")
             {
-                if (selected is null) return (call.Name, retained, Error(409, "case_selection_required"), null);
-                if (args.CaseId != selected) return (call.Name, retained, Error(403, "selected_case_mismatch"), null);
+                if (selected is null) return (call.Name, retained, await RefuseAsync(call.Name, 409, "case_selection_required"), null);
+                if (args.CaseId != selected) return (call.Name, retained, await RefuseAsync(call.Name, 403, "selected_case_mismatch"), null);
             }
             var tool = await CopilotMcp.InvokeToolAsync(http, call.Name, arguments, reject, token);
+            // A read the server withheld for an invalid record identity or a lost audit stops the turn, as the observation contract would.
+            if (tool.Structured["error"]?["code"] is JsonValue failed && (string?)failed is "copilot_context_invalid" or "audit_unavailable")
+                throw new TurnFailure((int)tool.Structured["httpStatus"]!, (string)failed!);
             if (tool.Structured["resultCode"] is JsonValue code && (string?)code == "confirmation_required")
                 return (call.Name, retained, tool.Structured, tool.Structured["uiOnly"]!.DeepClone());
             var observation = CopilotInputContract.Observe(call.Name, args?.Operation, tool.Structured)
