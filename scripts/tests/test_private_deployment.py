@@ -185,18 +185,36 @@ class PrivateDeploymentTests(unittest.TestCase):
                 return {"networkInterfaces": [{"id": "synthetic-nic"}]}
             if args[:3] == ("network", "nic", "show"):
                 return {"ipConfigurations": [{"privateIPAddress": "10.20.2.4"}]}
+            if args[:6] == ("network", "private-dns", "record-set", "a", "list", "-g"):
+                return [{"name": "stdemo1sttest", "aRecords": records}]
             raise AssertionError(args)
 
         az.side_effect = azure
-        with tempfile.TemporaryDirectory() as directory:
-            instance.directory = Path(directory)
-            instance.connect()
-            bridge = json.loads((instance.directory / "bridge.json").read_text())
-            self.assertEqual(3, len(bridge["resources"]))
-            self.assertEqual(zone["id"] + "/virtualNetworkLinks/deployment-executor",
-                             bridge["resources"]['azurerm_private_dns_zone_virtual_network_link.executor["kv"]'])
-        self.assertEqual(1, run.call_count)
-        self.assertEqual(("az", "network", "private-dns", "record-set", "a", "add-record"), run.call_args.args[:6])
+        for records, creates in (
+            ([], 1),
+            ([{"ipv4Address": "10.20.2.4"}], 0),
+            ([{"ipv4Address": "10.20.2.99"}], None),
+            ([{"ipv4Address": "10.20.2.4"}, {"ipv4Address": "10.20.2.99"}], None),
+        ):
+            with self.subTest(records=records), tempfile.TemporaryDirectory() as directory:
+                run.reset_mock()
+                instance.execute.reset_mock()
+                instance.directory = Path(directory)
+                if creates is None:
+                    with self.assertRaisesRegex(RuntimeError, "Existing Blob DNS record has unexpected addresses"):
+                        instance.connect()
+                    run.assert_not_called()
+                    instance.execute.assert_not_called()
+                    self.assertFalse((instance.directory / "bridge.json").exists())
+                    continue
+                instance.connect()
+                bridge = json.loads((instance.directory / "bridge.json").read_text())
+                self.assertEqual(3, len(bridge["resources"]))
+                self.assertEqual(zone["id"] + "/virtualNetworkLinks/deployment-executor",
+                                 bridge["resources"]['azurerm_private_dns_zone_virtual_network_link.executor["kv"]'])
+                self.assertEqual(creates, run.call_count)
+                if creates:
+                    self.assertEqual(("az", "network", "private-dns", "record-set", "a", "add-record"), run.call_args.args[:6])
 
     @patch.object(deployment, "run")
     @patch.object(deployment, "az")

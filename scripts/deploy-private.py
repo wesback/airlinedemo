@@ -273,9 +273,16 @@ terraform -chdir=infra/terraform state list
         nic = az("network", "nic", "show", "--ids", endpoint["networkInterfaces"][0]["id"])
         address = nic["ipConfigurations"][0]["privateIPAddress"]
         storage = "st" + self.args.prefix + self.account[-6:]
-        run("az", "network", "private-dns", "record-set", "a", "add-record",
-            "-g", self.rg, "-z", "privatelink.blob.core.windows.net", "-n", storage,
-            "-a", address, "-o", "none")
+        records = [record for record in az("network", "private-dns", "record-set", "a", "list",
+                                          "-g", self.rg, "-z", "privatelink.blob.core.windows.net")
+                   if record["name"] == storage]
+        addresses = {entry["ipv4Address"] for record in records for entry in record.get("aRecords", [])}
+        if addresses and addresses != {address}:
+            raise RuntimeError("Existing Blob DNS record has unexpected addresses; refusing to overwrite it.")
+        if not addresses:
+            run("az", "network", "private-dns", "record-set", "a", "add-record",
+                "-g", self.rg, "-z", "privatelink.blob.core.windows.net", "-n", storage,
+                "-a", address, "-o", "none")
         self.execute(f"""python3 - <<'PY'
 import socket
 for host in ('{self.account}.blob.core.windows.net', '{self.vault}.vault.azure.net'):
