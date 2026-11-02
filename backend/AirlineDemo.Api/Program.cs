@@ -128,7 +128,7 @@ builder.Services.AddSingleton<ICopilotRecordScreener>(sp => new CopilotRecordScr
     sp.GetRequiredService<ILogger<CopilotRecordScreener>>()));
 Program.RegisterProductionEvaluationExecutors(builder.Services);
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
-// Source implementations are registered here; pinned fixtures are verified before the app accepts requests.
+// Source implementations are registered here; fixtures are validated before the app accepts requests.
 builder.Services.AddSingleton<ISourceSystem<TechnicalPayload>, TechnicalSource>();
 builder.Services.AddSingleton<ISourceSystem<FinancePayload>, FinanceSource>();
 builder.Services.AddSingleton<ISourceSystem<MaintenancePayload>, MaintenanceSource>();
@@ -138,7 +138,7 @@ builder.Services.AddSingleton(IsolatedPdfParserOptions.Default);
 DemoFixture.LoadEmbedded();
 TransportSecurity.ValidateDeploymentConfiguration(builder.Configuration, builder.Environment);
 await using var app = builder.Build();
-SourceFixtureLoader.LoadPinned(
+SourceFixtureLoader.Load(
     System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"),
     app.Logger,
     app.Environment.EnvironmentName);

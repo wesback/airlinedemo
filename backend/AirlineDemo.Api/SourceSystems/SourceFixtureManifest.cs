@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace AirlineDemo.Api.SourceSystems;
 
-// Versioned metadata that describes a signed source fixture set (PRD FR-002, AC-004).
+// Versioned metadata that describes a source fixture set (PRD FR-002, AC-004).
 public sealed record SourceFixtureManifest
 {
     public const string SupportedSchemaVersion = "1";
@@ -52,9 +52,15 @@ public sealed record SourceFixtureManifest
             problems.Add($"scenarioDate '{ScenarioDate}' must be a valid date in YYYY-MM-DD form.");
         }
 
-        if (!Sha256Pattern.IsMatch(Sha256))
+        if (Sha256 is null || !Sha256Pattern.IsMatch(Sha256))
         {
             problems.Add("sha256 must be 64 hexadecimal characters.");
+        }
+
+        if (RecordCounts is null)
+        {
+            problems.Add("recordCounts is required.");
+            return problems;
         }
 
         foreach (var source in RequiredSources)

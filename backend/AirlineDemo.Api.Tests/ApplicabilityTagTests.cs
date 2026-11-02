@@ -225,23 +225,15 @@ public sealed class ApplicabilityTagTests
     }
 
     [Fact]
-    public void UpdatedFixtureVerifiesAndTamperingWithoutDetachedSignatureFailsAtomically()
+    public void UpdatedFixtureAndDigestDoNotReplacePublishedVersion()
     {
-        using var key = RSA.Create(2048);
         using var directory = new TemporaryDirectory();
         CopyDirectory(CommittedSources(), directory.Path);
-        foreach (var source in Sources)
-        {
-            var manifestPath = Path.Combine(directory.Path, $"{source}.manifest.json");
-            File.WriteAllBytes(
-                Path.Combine(directory.Path, $"{source}.manifest.sig"),
-                key.SignData(File.ReadAllBytes(manifestPath), HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
-        }
 
         var store = new SourceFixtureStore(PublishedFixtureState.Empty);
         Assert.Equal(
             SourceFixturePublication.Published,
-            SourceFixtureLoader.LoadAndPublish(directory.Path, key.ExportSubjectPublicKeyInfo(), store));
+            SourceFixtureLoader.LoadAndPublish(directory.Path, store));
         var before = store.State;
 
         var fixturePath = Path.Combine(directory.Path, "technical.json");
@@ -259,20 +251,20 @@ public sealed class ApplicabilityTagTests
         File.WriteAllBytes(manifestPathToChange, JsonSerializer.SerializeToUtf8Bytes(manifest));
 
         var error = Assert.Throws<SourceFixtureRefusedException>(() =>
-            SourceFixtureLoader.LoadAndPublish(directory.Path, key.ExportSubjectPublicKeyInfo(), store));
-        Assert.Equal("Source fixture 'technical' refused: manifest signature does not verify against the trust key.", error.Message);
+            SourceFixtureLoader.LoadAndPublish(directory.Path, store));
+        Assert.Equal("Source fixture version '2026.10.2' is already stored with different content; publication is refused.", error.Message);
         Assert.Equal(before.Packs, store.State.Packs);
         Assert.Equal(before.SourceRecords, store.State.SourceRecords);
         Assert.Equal(before.BasisPins, store.State.BasisPins);
         Assert.Equal(before.AuditEvents, store.State.AuditEvents);
         Assert.Equal(before.CaseData, store.State.CaseData);
 
-        Assert.Equal(5, SourceFixtureLoader.LoadPinned(CommittedSources()).Count);
+        Assert.Equal(5, SourceFixtureLoader.Load(CommittedSources()).Count);
     }
 
     private static void CopyDirectory(string source, string destination)
     {
-        foreach (var file in Directory.GetFiles(source))
+        foreach (var file in Directory.GetFiles(source, "*.json"))
         {
             File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
         }

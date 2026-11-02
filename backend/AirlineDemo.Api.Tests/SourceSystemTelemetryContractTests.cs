@@ -243,11 +243,11 @@ public sealed class SourceSystemTelemetryContractTests
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         var logger = factory.Services.GetRequiredService<ILoggerFactory>().CreateLogger("source-fixture-test");
         var environmentName = factory.Services.GetRequiredService<IHostEnvironment>().EnvironmentName;
-        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadPinned(
+        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.Load(
             Path.Combine(Path.GetTempPath(), $"missing-source-fixtures-{Guid.NewGuid():N}"),
             logger,
             environmentName));
-        Assert.Throws<IOException>(() => SourceFixtureLoader.LoadPinnedAndPublish(
+        Assert.Throws<IOException>(() => SourceFixtureLoader.LoadAndPublish(
             Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources"),
             new SourceFixtureStore(PublishedFixtureState.Empty),
             _ => throw new IOException("simulated fixture publication failure"),

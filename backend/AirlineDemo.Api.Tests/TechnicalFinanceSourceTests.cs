@@ -210,7 +210,7 @@ public sealed class TechnicalFinanceSourceTests
     [Fact]
     public void FixtureBytesThatDifferFromSignedDigestAreRejected()
     {
-        // AC-004: a fixture altered after signing is refused before any record is served.
+        // AC-004: a fixture altered without updating its digest is refused before any record is served.
         var tampered = EmbeddedBytes("AirlineDemo.Api.Fixtures.sources.technical.json").Append((byte)'\n').ToArray();
 
         var error = Assert.Throws<InvalidOperationException>(() =>
@@ -222,7 +222,7 @@ public sealed class TechnicalFinanceSourceTests
                 fields => new TechnicalPayload(fields)));
 
         Assert.Equal(
-            "Source fixture 'AirlineDemo.Api.Fixtures.sources.technical.json' does not match its signed digest.",
+            "Source fixture 'AirlineDemo.Api.Fixtures.sources.technical.json' does not match its manifest digest.",
             error.Message);
     }
 

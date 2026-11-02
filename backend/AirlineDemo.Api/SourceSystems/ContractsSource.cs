@@ -208,7 +208,7 @@ public sealed class ContractsSource : ISourceSystem<ContractsPayload>
             throw new InvalidOperationException($"Source manifest for 'contracts' declares scenarioDate '{manifest.ScenarioDate}', expected '2026-10-01'.");
         var digest = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
         if (!string.Equals(manifest.Sha256, digest, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Source fixture '{resourceName}' does not match its signed digest.");
+            throw new InvalidOperationException($"Source fixture '{resourceName}' does not match its manifest digest.");
         FixtureFile file;
         try
         {

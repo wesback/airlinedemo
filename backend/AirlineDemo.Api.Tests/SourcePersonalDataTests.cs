@@ -22,7 +22,6 @@ public sealed class SourcePersonalDataTests
     [Fact]
     public void MarkerMustBeBooleanAndRefusalPreservesPublishedRecords()
     {
-        using var key = RSA.Create(2048);
         (string? Marker, bool Accepted)[] inputs =
         [
             ("true", true),
@@ -35,7 +34,7 @@ public sealed class SourcePersonalDataTests
         foreach (var (marker, accepted) in inputs)
         {
             using var directory = new TempDirectory();
-            WriteFixtureSet(directory.Path, key, marker);
+            WriteFixtureSet(directory.Path, marker);
             var store = new SourceFixtureStore(SeedState());
             var before = store.State;
 
@@ -43,14 +42,14 @@ public sealed class SourcePersonalDataTests
             {
                 Assert.Equal(
                     SourceFixturePublication.Published,
-                    SourceFixtureLoader.LoadAndPublish(directory.Path, key.ExportSubjectPublicKeyInfo(), store));
+                    SourceFixtureLoader.LoadAndPublish(directory.Path, store));
                 Assert.Equal(2, store.State.Packs.Count);
                 Assert.Equal(6, store.State.SourceRecords.Count);
             }
             else
             {
                 Assert.Throws<SourceFixtureRefusedException>(() =>
-                    SourceFixtureLoader.LoadAndPublish(directory.Path, key.ExportSubjectPublicKeyInfo(), store));
+                    SourceFixtureLoader.LoadAndPublish(directory.Path, store));
                 AssertStateEqual(before, store.State);
             }
         }
@@ -121,11 +120,10 @@ public sealed class SourcePersonalDataTests
     }
 
     [Fact]
-    public void UpdatedFixtureVerifiesAndTamperingWithoutDetachedSignatureFailsAtomically()
+    public void UpdatedFixtureWithMatchingDigestLoadsAndMismatchFailsAtomically()
     {
-        using var key = RSA.Create(2048);
         using var directory = new TempDirectory();
-        WriteFixtureSet(directory.Path, key, "false");
+        WriteFixtureSet(directory.Path, "false");
 
         var fixturePath = Path.Combine(directory.Path, "records.json");
         var changedFixture = File.ReadAllBytes(fixturePath).Append((byte)'\n').ToArray();
@@ -136,12 +134,15 @@ public sealed class SourcePersonalDataTests
         File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(manifest));
 
         var store = new SourceFixtureStore(SeedState());
+        Assert.Equal(SourceFixturePublication.Published, SourceFixtureLoader.LoadAndPublish(directory.Path, store));
         var before = store.State;
-        Assert.Throws<SourceFixtureRefusedException>(() =>
-            SourceFixtureLoader.LoadAndPublish(directory.Path, key.ExportSubjectPublicKeyInfo(), store));
+        File.AppendAllText(fixturePath, "\n");
+        var error = Assert.Throws<SourceFixtureRefusedException>(() =>
+            SourceFixtureLoader.LoadAndPublish(directory.Path, store));
+        Assert.Equal("Source fixture 'records' refused: fixture SHA-256 digest does not match the manifest.", error.Message);
         AssertStateEqual(before, store.State);
 
-        Assert.Equal(5, SourceFixtureLoader.LoadPinned(CommittedSources()).Count);
+        Assert.Equal(5, SourceFixtureLoader.Load(CommittedSources()).Count);
     }
 
     private static HttpRequestMessage Request(string path, string sessionId)
@@ -180,7 +181,7 @@ public sealed class SourcePersonalDataTests
 
     private static string CommittedSources() => Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources");
 
-    private static void WriteFixtureSet(string directory, RSA signingKey, string? marker)
+    private static void WriteFixtureSet(string directory, string? marker)
     {
         foreach (var source in Sources)
         {
@@ -206,9 +207,6 @@ public sealed class SourcePersonalDataTests
 
             File.WriteAllBytes(Path.Combine(directory, $"{source}.json"), fixture);
             File.WriteAllBytes(Path.Combine(directory, $"{source}.manifest.json"), manifest);
-            File.WriteAllBytes(
-                Path.Combine(directory, $"{source}.manifest.sig"),
-                signingKey.SignData(manifest, HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
         }
     }
 

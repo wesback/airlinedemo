@@ -2,7 +2,7 @@
 prd_id: "aircraft-source-systems"
 title: "Synthetic Source-System Stubs and Read-Only Source Port"
 status: "draft"
-version: "0.10.0"
+version: "0.11.0"
 owners: ["Product Owner"]
 reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer", "@wesback"]
 created_date: "2026-10-16"
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Synthetic Source-System Stubs and Read-Only Source Port
 
-> **aircraft-source-systems** | Status: Draft | Version: 0.10.0 | Last Updated: 2026-11-02
+> **aircraft-source-systems** | Status: Draft | Version: 0.11.0 | Last Updated: 2026-11-02
 
 ## Executive Summary
 
@@ -40,6 +40,7 @@ Version 0.9.1 closes the planner's open points: the telemetry approval is a reco
 This PRD adds no workflow state, role, agent or external action. ARR stays authoritative for case workflow, authority boundaries and the evidence basis. Acceptance criteria describe future verification and are not evidence of delivery.
 
 Version 0.10.0 adds the [arrival source-interaction addendum](#arrival-source-interaction-addendum) for one fresh, opted-in case; all other cases retain their existing behavior.
+Version 0.11.0 removes source-fixture signing in every environment while retaining manifest hash and metadata validation.
 
 ## Research Readiness
 
@@ -103,9 +104,10 @@ All systems, records, actors and decisions are synthetic or simulated.
 | DD-024 | Direct source-record reads are limited to 20 requests per authenticated session and case per minute, with at most 2 in-flight reads per case, no pagination, and at most 100 records in one response. A limit breach returns 429 with error.code source_read_limit; a source response exceeding 100 records returns 422 with error.code source_record_limit and no partial records; a read exceeding the 1-second request deadline returns 504 with error.code source_read_timeout. |
 | DD-025 | After Telemetry Foundations approves the proposed additions and the approval is recorded in `docs/telemetry/source-system-proposed-additions.md`, source-specific structured logs may use source.id, case.id, event.outcome, and duration; these fields are never metric dimensions, and raw record identifiers and payloads remain excluded. The approval is a human merge gate: it exists only when a pull request that adds `docs/telemetry/source-system-proposed-additions.md` (naming the four attributes, their allowed values, and the approving person) has been merged to the default branch by a person. Until then these attributes stay suppressed and the diagnostic allowlist excludes them; no automated process creates or edits that file. |
 | DD-026 | DD-026: A source coverage flag is true only when the source mode is available and at least one in-scope record from that source is present; otherwise it is false. |
-| DD-027 | DD-027: For Cases A, B, and C, the signed source fixtures are the canonical identifier set; any Aircraft Case Pack artifact for those scenarios uses the same case, document, and component identifiers. |
+| DD-027 | DD-027: For Cases A, B, and C, the versioned source fixtures are the canonical identifier set; any Aircraft Case Pack artifact for those scenarios uses the same case, document, and component identifiers. |
 | DD-028 | DD-028: For repeated exports of the same recorded decision, serialized bytes are identical after removing the `exportedAt` field; `contentHash` covers every other field except `contentHash` itself. This rule follows AC-024 and DD-016. |
 | DD-033 | This delivery adds no package dependency and reuses the existing application packages. This is a selected design choice, not a repository-wide prohibition; any demonstrated dependency need is reviewed by the PRD owner under repository policy. The fixture rehearsal uses no external runtime service. |
+| DD-034 | Source fixture manifests require no detached signatures or signing keys in any environment. SHA-256, metadata, ownership and count validation remain; a co-located hash detects drift but cannot establish authorship when fixture and manifest both change. The repository review gate is the trust boundary for these synthetic fixtures. Unrelated signing controls remain unchanged. |
 
 ## Product Goals
 
@@ -124,7 +126,7 @@ Unqualified IDs belong to this PRD. Companion IDs are cited as `ARR:` or `CP:` p
 | ID | Requirement | Actor / trigger | Companion dependencies | Acceptance criteria | Product goals |
 |---|---|---|---|---|---|
 | FR-001 | Define the read-only source port and the `SourceRecord` envelope (DD-002, DD-004, DD-012), with `list` and `get` operations per case and source, a typed `source_unavailable` result, and versioned errors. | Application code or an authenticated client reads a source. | ARR:DD-014, ARR:NFR-008. | AC-001, AC-002, AC-003, AC-021 | GOAL-001 |
-| FR-002 | Implement the five stubs deterministically from versioned fixtures with manifest, hash, fixed scenario date and refuse-on-mismatch loading, covering the ARR core case and Cases A, B and C. | Application seeds fixtures. | CP:FR-001, CP:FR-002, ARR:DD-018. | AC-004, AC-005 | GOAL-001 |
+| FR-002 | Implement the five stubs deterministically from versioned fixtures with manifest, hash, fixed scenario date and refuse-on-mismatch loading, without fixture signatures in any environment, covering the ARR core case and Cases A, B and C. | Application seeds fixtures. | CP:FR-001, CP:FR-002, ARR:DD-018, DD-034. | AC-004, AC-005, AC-069 | GOAL-001 |
 | FR-003 | Enforce server-side identity, role and case scope on every source read; never return a record for a different case. | Authenticated user or investigator tool reads a source. | ARR:DD-014, ARR:NFR-001, CP:FR-008. | AC-006, AC-007, AC-038 | GOAL-001 |
 | FR-004 | Pin the source records a basis used into the evidence basis. | Coordinator gathers sources. | ARR:FR-001. | AC-008 | GOAL-001 |
 | FR-005 | Give the investigator the read-only tools `list_source_records` and `get_source_record` within its existing budgets and citation validation; a source claim cites a `SourceRecord` witness. | Investigation step runs. | ARR:FR-002, ARR:AC-013. | AC-010, AC-011, AC-022 | GOAL-001 |
@@ -296,6 +298,7 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 | AC-003 | Given an unsupported `/api/v{n}/` version, then the response is 400 `unsupported_contract_version` with no case data; given an unauthenticated read, then 401 with no case data; given a source in `unavailable` mode, when its records are read directly, then the response is 503 with `error.code = source_unavailable` and neither a `records` property nor any record data. | FR-001 | Automated |
 | AC-004 | Given the fixtures, when loaded, then the ARR core case and Cases A, B and C each have records in all five sources, and the manifest hash, `schemaVersion` and counts validate; the `caseId`, `documentId` and `componentId` values equal the canonical ARR and CP values (NFR-007, DD-027), compared against the ARR fixtures and the CP pack on the default branch. | FR-002 | Automated |
 | AC-005 | Given a changed fixture byte, a wrong `schemaVersion` or a wrong count, when loaded, then loading is refused with a reason and no partial data is published; given previously stored source data, pins and audit records, an injected validation or publication failure leaves all three byte-for-byte unchanged (NFR-002); loading the same version and hash again is a no-op, and a stored version with different content is refused. | FR-002 | Automated |
+| AC-069 | Given the five committed fixture files and manifests without signature files or a key, when the loader used by startup runs in Development, Staging and Production, then all five sources load; a changed fixture byte without its matching digest is refused as in AC-005. The hash does not establish authorship. | FR-002 | Automated |
 | AC-006 | Given a user whose scope excludes a case, when any source endpoint is read, then the response equals that of a nonexistent case and no record is returned and no source stub is called (a counting fake on the port records zero calls). | FR-003 | Automated |
 | AC-007 | Given a record whose `caseId` differs from the requested case (seeded in a test fixture), when read, then it is never returned, and the attempt is a diagnostics event without payload. | FR-003 | Automated |
 | AC-038 | Given each documented role and source (technical-reviewer: technical, maintenance, records; finance-reviewer: technical, finance; legal-reviewer: contracts, records; presenter and executive: summary only), when every role reads every source, then allowed reads return records and an in-scope denied role-source pair or in-scope unknown role returns 403 `forbidden`; a missing or out-of-scope case returns bodyless 404. Denied reads call no source stub and disclose no record; a table-driven test enumerates all role-by-source cases (DD-023). | FR-003 | Automated |
@@ -336,7 +339,7 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 | FR | ACs |
 |---|---|
 | FR-001 | AC-001, AC-002, AC-003, AC-021 |
-| FR-002 | AC-004, AC-005 |
+| FR-002 | AC-004, AC-005, AC-069 |
 | FR-003 | AC-006, AC-007, AC-038 |
 | FR-004 | AC-008 |
 | FR-005 | AC-010, AC-011, AC-022 |
@@ -466,7 +469,7 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 
 **Scope and precedence.** This addendum applies only to the fresh, enrolled `case-001` owned by `presenter`. For that case it supersedes the original scope's UI exclusion, mode-only mutation statement, package-before-gather flow and usability exclusion. It does not alter legacy scenarios or introduce an ARR lifecycle state: `not_started`, `collecting` and `ready` are source-journey metadata. SRC DD-023, DD-024 and DD-026 remain canonical; this addendum does not widen their entitlements, limits or coverage.
 
-**Existing contract evidence.** The [source contract](../source-systems-contract.md) specifies the role matrix, summary, signed fixtures and `source-record-pins-v1`; the [read endpoint](../../backend/AirlineDemo.Api/SourceSystems/SourceReadEndpoints.cs), [admission store](../../backend/AirlineDemo.Api/SourceSystems/SourceReadAdmissionStore.cs), [source basis](../../backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs) and [case store](../../backend/AirlineDemo.Api/Persistence/CaseStateStore.cs) define the current governed read, serialization and expected-revision operations.
+**Existing contract evidence.** The [source contract](../source-systems-contract.md) specifies the role matrix, summary, versioned fixtures and `source-record-pins-v1`; the [read endpoint](../../backend/AirlineDemo.Api/SourceSystems/SourceReadEndpoints.cs), [admission store](../../backend/AirlineDemo.Api/SourceSystems/SourceReadAdmissionStore.cs), [source basis](../../backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs) and [case store](../../backend/AirlineDemo.Api/Persistence/CaseStateStore.cs) define the current governed read, serialization and expected-revision operations.
 
 ### Arrival decisions
 
@@ -490,7 +493,7 @@ The plan-qualified identifiers in the second column are distinct from this PRD's
 | FR-021 | plan:FR-005 | Presenter completion requires all five available, nonempty retrieved source sets to be pinned. | GOAL-001 | AC-049, AC-050, AC-051, AC-058, AC-060, AC-068 |
 | FR-022 | plan:FR-006 | Each source pin preserves the immutable record identity, version, complete content and digest. | GOAL-001 | AC-049, AC-050, AC-051 |
 | FR-023 | plan:FR-007 | Maintenance task-card text is literal untrusted data and cannot become markup, instructions or actions. | GOAL-001 | AC-054 |
-| FR-024 | plan:FR-008 | A signed-fixture-only rehearsal ends at enabled intake/AI handoff with zero external or model calls; actual investigation is optional and requires its existing configured model. | GOAL-001 | AC-056, AC-061 |
+| FR-024 | plan:FR-008 | A fixture-only rehearsal ends at enabled intake/AI handoff with zero external or model calls; actual investigation is optional and requires its existing configured model. | GOAL-001 | AC-056, AC-061 |
 | FR-025 | plan:FR-002 | An in-scope presenter starts the enrolled case's arrival journey through an authenticated command. | GOAL-001 | AC-041, AC-043, AC-044, AC-065 |
 | FR-026 | plan:FR-005 | The server rejects package submission before intake side effects until arrival completion, naming missing sources when applicable. | GOAL-001 | AC-052, AC-057, AC-058 |
 | FR-027 | plan:FR-006 | A successful nonempty retrieval commits its source pins and audit atomically at the expected revision, preserving earlier basis versions and other source pins. | GOAL-001 | AC-049, AC-050, AC-063 |
@@ -504,7 +507,7 @@ The plan-qualified identifiers in the second column are distinct from this PRD's
 |---|---|---|---|
 | NFR-009 / Performance and capacity | plan:NFR-001 | Preserve DD-024's shared rolling admission, concurrency, record-count and deadline bounds in the precise scope below. | AC-045, AC-046 |
 | NFR-010 / Reliability and resilience | plan:NFR-002 | Preserve earlier basis bytes and digests, atomic expected-revision commits, exact replay and failure isolation across file and SQL-compatible stores. | AC-044, AC-049, AC-050, AC-051 |
-| NFR-011 / Security and compatibility | plan:NFR-003 | Preserve existing source summary, record and signed-fixture contracts and legacy case behavior; protect role-scoped activity and the server-side intake gate. | AC-040, AC-043, AC-047, AC-048, AC-052, AC-056, AC-058 |
+| NFR-011 / Security and compatibility | plan:NFR-003 | Preserve existing source summary, record and fixture-hash contracts and legacy case behavior; protect role-scoped activity and the server-side intake gate. | AC-040, AC-043, AC-047, AC-048, AC-052, AC-056, AC-058 |
 | NFR-012 / Usability and accessibility | plan:NFR-004 | Provide native keyboard-operable controls, accessible source headings and status/alert announcements in both existing themes; preserve 4.5:1 text contrast using established tokens and manual review. | AC-042, AC-053, AC-054, AC-055, AC-059 |
 
 ### Role and disclosure matrix
@@ -579,7 +582,7 @@ DD-024 counts admitted direct list/get and arrival retrieval calls together acro
 - Source pins and arrival audit do not count as document intake or investigation. Intake is complete only on the existing `package-received` journey event; investigation is complete only on recorded investigation or agent events. After completion and before package submission, arrival is done, intake is current and investigation is upcoming.
 - The UI displays `Not permitted` without read actions or details for denied sources, distinguishes the contract outcomes, serializes retrieval actions, disables duplicate actions while pending and never auto-retries. The role-filtered activity trail displays only projected fields; case and fleet refresh after successful writes and authenticated persona switches without closing the open arrival case.
 - A successful or unsuccessful direct list/get or arrival retrieval can commit an audit and advance the revision; the existing direct-read success envelope contains no revision. After each such request, the UI refreshes case and arrival metadata before enabling another source read or case-changing command, without repeating the source read. If refresh fails, show `Status unavailable`, disable those actions and allow an explicit metadata-only retry or persona switch.
-- Once the feature is implemented, update the source-basis section of [docs/source-systems-contract.md](../source-systems-contract.md) to describe the enrolled arrival exception alongside legacy gather deduplication and exact replay. If `docs/` is outside the implementer's write scope, a person makes that documentation change. Fixture envelopes, manifests and signatures remain unchanged.
+- Once the feature is implemented, update the source-basis section of [docs/source-systems-contract.md](../source-systems-contract.md) to describe the enrolled arrival exception alongside legacy gather deduplication and exact replay. If `docs/` is outside the implementer's write scope, a person makes that documentation change. Fixture envelopes and manifest fields remain unchanged by the arrival feature.
 
 ### Arrival acceptance criteria
 
@@ -605,14 +608,14 @@ Progress: arrival criteria AC-040 through AC-068 are not started; this addendum 
 | AC-053 | Given a source panel and authenticated persona switch, when the UI mounts or the session or case changes, then it performs no automatic record list/get or retrieval, clears prior data and in-flight work, ignores late old-session results, and offers `View records` only for entitled sources as a separate user-triggered audited read. | FR-018, FR-019 | Automated |
 | AC-054 | Given a maintenance task card containing instruction-shaped or HTML-shaped text, when displayed, then it is labelled `Untrusted source data` and rendered as literal text with no markup, link, command, tool action, approval or automatic request. | FR-023 | Automated |
 | AC-055 | Given the arrival interface in each existing theme, when a person navigates by keyboard and inspects the source headings and status/alert announcements, then controls are operable, denied and disabled actions are clear, and text meets 4.5:1 contrast using established tokens. | FR-018 | Manual |
-| AC-056 | Given a fresh temporary case store, committed signed fixtures and real source ports, when authenticated presenter, technical, finance and legal sessions complete the five-source journey through the production host, then intake/AI handoff is enabled with 5 of 5 sets pinned and counting model and network edges report zero calls; no package is submitted and no AI result is claimed. | FR-024 | Automated |
+| AC-056 | Given a fresh temporary case store, committed hash-validated fixtures and real source ports, when authenticated presenter, technical, finance and legal sessions complete the five-source journey through the production host, then intake/AI handoff is enabled with 5 of 5 sets pinned and counting model and network edges report zero calls; no package is submitted and no AI result is claimed. | FR-024 | Automated |
 | AC-057 | Given a source status or summary failure, when the enrolled case is displayed, then it is shown as unavailable rather than ready, and browsing a later step does not enable intake or forward progression. | FR-018, FR-026 | Automated |
 | AC-058 | Given one enrolled case snapshot, when status and completion are requested with technical and finance missing, then status reports exactly those sources in canonical order, `canComplete: false` and no coverage field, and completion returns the same ordered list; after all five sets are valid, only presenter completion changes state to `ready`. | FR-021, FR-026 | Automated |
 | AC-059 | Given each reviewer and presenter, when the real UI switches authenticated personas and reads or filters source activity, then the open case remains open, case and fleet refresh after the switch or a successful write, denied panels say `Not permitted`, outcomes remain distinct, hidden references never appear, and only one retrieval is pending with no automatic retry. | FR-018, FR-019, FR-020, FR-029 | Automated |
 | AC-060 | Given a completed arrival with source pins but no package or investigation events, when the real journey model and UI load, then arrival is done, intake is current and investigation is upcoming; source pins and read audit alone never complete either later step. | FR-021 | Automated |
 | AC-061 | Given the real App and HTTP-edge responses, when presenter, technical, finance and legal personas walk the five sources, then the UI reaches enabled handoff without claiming an AI run. The local rehearsal guide `docs/demo/arriving-plane-source-journey.md` states the opt-in, fresh-store setup, presenter → technical → finance → legal → presenter order, one unavailable-source recovery, expected activity and pins, and the stop before package submission. | FR-024 | Automated and manual |
 | AC-062 | Given the UI at case revision 7 and one retrieval returning 503 `source_unavailable` after its audit commits revision 8, when the UI handles the failure, then case and arrival metadata refresh to revision 8 before another source read or mutation is enabled, with no second retrieval request. If refresh fails, the UI shows `Status unavailable`, disables those actions and offers an explicit metadata-only retry. | FR-030 | Automated |
-| AC-063 | Given the implemented feature, when an authorized writer updates `docs/source-systems-contract.md`, then its source-basis section states that identical legacy gathers are no-ops, a new successful nonempty enrolled arrival retrieval appends one basis even for identical content, and an exact command replay appends none. Fixture envelopes, manifests and signatures are unchanged. | FR-027 | Manual |
+| AC-063 | Given the implemented feature, when an authorized writer updates `docs/source-systems-contract.md`, then its source-basis section states that identical legacy gathers are no-ops, a new successful nonempty enrolled arrival retrieval appends one basis even for identical content, and an exact command replay appends none. Fixture envelopes and manifest fields are unchanged by the arrival feature. | FR-027 | Manual |
 | AC-064 | Given the UI at case revision 7 and a successful direct `View records` read whose audit commits revision 8, when the response arrives without a revision field, then case and arrival metadata refresh to revision 8 before another source read or mutation is enabled, with exactly one record request. If refresh fails, the UI shows `Status unavailable`, disables those actions and offers an explicit metadata-only retry. | FR-030 | Automated |
 | AC-065 | Given a successful presenter start command and a later independent case commit, when the authorized presenter replays the exact start command, then HTTP 200 returns the original receipt without another source call, revision, pin or audit event; changing only its expected revision returns 409 `command_id_conflict` without mutation. | FR-025, FR-028 | Automated |
 | AC-066 | Given every matrix role and each of the five available, populated sources with an existing record, when otherwise valid arrival retrieval and direct list/get requests are exercised, then the exact matrix responses and fields apply; denied or out-of-scope requests make zero port calls and disclose no record. | FR-019 | Automated |
@@ -621,7 +624,7 @@ Progress: arrival criteria AC-040 through AC-068 are not started; this addendum 
 
 ### Delivery and risk boundary
 
-No separate source systems, real data, new infrastructure, package dependencies, agents, or changes to signed fixture contracts, manifests or signatures are in scope. The requested fixture rehearsal has no external runtime dependency; this PRD's no-package choice is narrower than the repository's package-addition allowance. In-process stubs follow DD-001, synthetic-only data follow ARR:CON-001, and the no-new-role or lifecycle-state boundary is a confirmed feature constraint and follows DD-014. [Main CI after #706](https://github.com/wesback/airlinedemo/actions/runs/41441554685) and [the preceding main CI](https://github.com/wesback/airlinedemo/actions/runs/41434791573) report that the `maintenance` manifest signature does not verify against the trust key. This predates the arrival addendum and blocks the fixture-only rehearsal until the release owner or key holder restores verification separately. A fixture-only rehearsal stops before package submission; an actual model-backed investigation is a separate optional continuation.
+No separate source systems, real data, new infrastructure, package dependencies, agents or changes to fixture record schemas are in scope. The independent CI repair reconciles manifest counts and removes the signature requirement under DD-034; it does not change role, case or read-limit controls. The fixture rehearsal has no external runtime dependency, and the co-located hash does not prove fixture authorship. In-process stubs follow DD-001, synthetic-only data follow ARR:CON-001, and the no-new-role or lifecycle-state boundary follows DD-014. A fixture-only rehearsal stops before package submission; an actual model-backed investigation is a separate optional continuation.
 
 The human merge is the PRD approval gate: **@wesback is the named reviewer, approver and merger; the PRD correction was merged in #707. @wesback approved implementation as owner on 2026-11-02.** The repository pipeline performs quality, security and functional planning and creates implementation stories; production stories remain gated on its output.
 
@@ -643,7 +646,7 @@ None requested.
 
 ### Handoff Readiness
 
-The arrival scope is Product Owner and Engineering Reviewer approved by @wesback on 2026-11-02. The last formal quality review approved both exits with comments and identified two cautions; this revision clarifies the scoped `NFR-012` placement and separates the fixture dependency from PRD quality decisioning. A fresh formal review is pending. The maintenance signature mismatch is a separate delivery dependency that blocks fixture rehearsal and the full suite, not the PRD quality gate. No production story begins until this PRD update is human-merged and post-merge security and functional planning creates the implementation stories. The pipeline plans a merged PRD (threat model, then stories); no additional ARR amendment AS-002 is needed first. The telemetry approval record (DD-025) remains a separate person-merged pull request; the stories adding its four attributes depend on it.
+The arrival scope is Product Owner and Engineering Reviewer approved by @wesback on 2026-11-02. The owner subsequently approved removing source-fixture signing in all environments; DD-034 records that decision and its authenticity limitation. No arrival production story begins until this PRD update is human-merged and post-merge security and functional planning creates the implementation stories. The independent CI repair must pass before fixture rehearsal; no signing key is needed. The telemetry approval record (DD-025) remains a separate person-merged pull request; the stories adding its four attributes depend on it.
 
 ## Disclaimer
 

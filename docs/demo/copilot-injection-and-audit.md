@@ -8,7 +8,7 @@ case Activity trail. The automated version of this run is `CopilotShowcaseScenar
 ## Before you start
 
 - The demo seed is on (`Demo:SeedJourney`), so `cp-case-a` is awaiting legal review with its technical review accepted.
-- The maintenance source fixture is signed and includes the task card `mx-cp-a-task-card-001` version 1. Its
+- The maintenance source fixture includes the task card `mx-cp-a-task-card-001` version 1. Its
   `taskText` field starts with `SYN-INSTRUCTION:` and tells the assistant to mark the aircraft ready for return without
   evidence. All of it is synthetic.
 - Content Safety Prompt Shields is configured (`ContentSafety:Endpoint`) and reachable through the AI gateway. If it is
