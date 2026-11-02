@@ -112,7 +112,8 @@ export function createHangarSceneMotionControllers(targetRadius: number | Hangar
 }
 
 export type HangarCameraPresetRequest = { preset: 'overview' | 'aircraft'; letter?: 'A' | 'B' | 'C'; requestId: number };
-export type HangarSceneProps = { cameraPreset?: HangarCameraPresetRequest | null; selectedObjectId?: string | null; onSelect?: (aircraftId: string) => unknown; avatarTarget?: { x: number; z: number } | null; route?: unknown; sceneData?: unknown; onCreated?: (state:any)=>unknown; onContextLost?:()=>unknown; externalRefresh?: boolean; refreshReader?: () => Promise<unknown> | unknown; snapshot?: unknown };
+export type HangarFollowPose = { target: { x: number; y: number; z: number }; radius: number; azimuthDegrees: number; polarDegrees: number };
+export type HangarSceneProps = { cameraPreset?: HangarCameraPresetRequest | null; selectedObjectId?: string | null; onSelect?: (aircraftId: string) => unknown; avatarTarget?: { x: number; z: number } | null; followPose?: HangarFollowPose | null; route?: unknown; sceneData?: unknown; onCreated?: (state:any)=>unknown; onContextLost?:()=>unknown; externalRefresh?: boolean; refreshReader?: () => Promise<unknown> | unknown; snapshot?: unknown };
 
 export async function loadHangarScene(controllers = createHangarSceneMotionControllers()): Promise<ComponentType<HangarSceneProps>> {
   const fiber = await import('@react-three/fiber');
@@ -190,6 +191,9 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
       return layout?{x:layout.centre.x,y:layout.dimensions.height/2,z:layout.centre.z}:{x:0,y:0,z:0};
     },[focusLetter,cameraRequest]);
     const handleCameraKey=(key:string)=>{const result=controllers.camera.key(key);if(result.handled)setCameraState(result.state);};
+    // A follow pose from the page overrides the preset camera so the view tracks the walking avatar.
+    const followPose=props?.followPose??null;
+    const followTarget=useMemo(()=>followPose?{x:followPose.target.x,y:followPose.target.y,z:followPose.target.z}:null,[followPose?.target.x,followPose?.target.y,followPose?.target.z]);
     const sceneView=useMemo(()=>({
       ...(sceneData && typeof sceneData==='object' ? sceneData as object : {}),
       contractVersion:1,
@@ -210,7 +214,7 @@ export async function loadHangarScene(controllers = createHangarSceneMotionContr
         createElement('button',{type:'button',onClick:()=>{navigateCamera('aircraft','C');onSelect?.('AIR-3');}},'Pointer select AIR-3'),
       ),
       createElement('section',{className:'hangar-scene__controls','aria-label':'Motion controls'},createElement('button',{type:'button',onClick:()=>setMotionOverride(true)},'Reduce motion'),createElement('button',{type:'button',onClick:()=>setMotionOverride(false)},'Allow motion')),
-      createElement(HangarCanvasAdapter,{externalRefresh:props?.externalRefresh,refreshReader:props?.refreshReader,snapshot:props?.snapshot as any,camera:ownedCamera,sceneGroup,sceneData:sceneData ?? sceneView,selection:selected,avatar:avatarState,route:route ?? null,invalidate:canvasInvalidate,invalidationCapture:CaptureCanvasInvalidation,target:cameraTarget,radius:cameraState.radius,reducedMotion:reduced,azimuthDegrees:cameraState.azimuthDegrees,polarDegrees:cameraState.polarDegrees,canvasComponent:Canvas,onCreated:props?.onCreated,onContextLost:props?.onContextLost}),
+      createElement(HangarCanvasAdapter,{externalRefresh:props?.externalRefresh,refreshReader:props?.refreshReader,snapshot:props?.snapshot as any,camera:ownedCamera,sceneGroup,sceneData:sceneData ?? sceneView,selection:selected,avatar:avatarState,route:route ?? null,invalidate:canvasInvalidate,invalidationCapture:CaptureCanvasInvalidation,target:followTarget??cameraTarget,radius:followPose?followPose.radius:cameraState.radius,reducedMotion:reduced,azimuthDegrees:followPose?followPose.azimuthDegrees:cameraState.azimuthDegrees,polarDegrees:followPose?followPose.polarDegrees:cameraState.polarDegrees,canvasComponent:Canvas,onCreated:props?.onCreated,onContextLost:props?.onContextLost}),
     );
   };
   return HangarScene;

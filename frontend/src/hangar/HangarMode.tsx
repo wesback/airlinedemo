@@ -14,7 +14,9 @@ import HangarErrorBoundary from './errorBoundary';
 import hangarManifest from './sceneManifest.json';
 import { HANGAR_SOURCE_IDS, type HangarSourceSummaryEntry } from './sourceSummary';
 import { createHangarWalkController } from './walkController';
-import { createHangarFollowCamera, type HangarFollowCamera } from './followCamera';
+import { createHangarFollowCamera, HANGAR_FOLLOW_DEFAULT_POLAR_DEGREES, HANGAR_FOLLOW_DEFAULT_RADIUS, type HangarFollowCamera } from './followCamera';
+import { advanceHangarPlayRoute, createHangarPlayLayout, isInHangarRackZone, planHangarPlayRoute, stepHangarAvatar } from './hangarPlay';
+import { getHangarRouteLiveDirection, HANGAR_ROUTE_ARRIVAL_THRESHOLD } from './routePlanner';
 import HangarNon3dDataRoom from './non3dDataRoom';
 import './hangarMode.css';
 
@@ -56,6 +58,8 @@ export const HANGAR_AIRCRAFT_MODELS: Record<string, string> = {
 };
 
 const AIRCRAFT_OBJECT_IDS = ['SYN-CP-A-AIR-001', 'SYN-CP-B-AIR-001', 'SYN-CP-C-AIR-001'];
+const HANGAR_PLAY_LAYOUT = createHangarPlayLayout(hangarManifest);
+const HANGAR_ROUTE_REPLAN_MS = 150;
 const WALKABLE_POLYGON = [{ x: -5, z: -5 }, { x: 5, z: -5 }, { x: 5, z: 5 }, { x: -5, z: 5 }];
 const NON_3D_ACTION_TARGETS = {
   selection: 'non-3d-data-room-heading',
@@ -153,6 +157,17 @@ export default function HangarMode({
   const [cameraPreset, setCameraPreset] = useState<HangarCameraPresetRequest | null>(null);
   const [activePreset, setActivePreset] = useState<string>('overview');
   const cameraRequestCounter = useRef(0);
+  // In-scene play state: the avatar walks the manifest layout; route and avatar stay in the client (DD-020).
+  const hangarStageRef = useRef<HTMLDivElement | null>(null);
+  const [playAvatar, setPlayAvatar] = useState(HANGAR_PLAY_LAYOUT.start);
+  const [playGuideCaseId, setPlayGuideCaseId] = useState<string | null>(null);
+  const [playRoute, setPlayRoute] = useState<Array<{ x: number; z: number }> | null>(null);
+  const [playLive, setPlayLive] = useState('');
+  const [playDossiersOpen, setPlayDossiersOpen] = useState(false);
+  const [playArrivedCaseId, setPlayArrivedCaseId] = useState<string | null>(null);
+  const playInRackZone = useRef(isInHangarRackZone(HANGAR_PLAY_LAYOUT.start, HANGAR_PLAY_LAYOUT));
+  const playLastPlan = useRef(0);
+  const playDossierButtons = useRef<Array<HTMLButtonElement | null>>([]);
 
   if (!hangarFollowCameraRef.current) hangarFollowCameraRef.current = createHangarFollowCamera({ x: 0, y: 0, z: 0 });
   if (!hangarWalkControllerRef.current) {
@@ -160,6 +175,11 @@ export default function HangarMode({
   }
 
   function requestCamera(preset: 'overview' | 'aircraft', letter?: Letter) {
+    // Choosing a preset hands the camera back from the avatar.
+    if (hangarFollowCameraRef.current?.followEnabled) {
+      hangarFollowCameraRef.current.turnOff();
+      setHangarFollowEnabled(false);
+    }
     cameraRequestCounter.current += 1;
     setCameraPreset({ preset, letter, requestId: cameraRequestCounter.current });
     setActivePreset(preset === 'aircraft' && letter ? `cp-case-${letter.toLowerCase()}` : 'overview');
@@ -512,6 +532,136 @@ export default function HangarMode({
     event.preventDefault();
   };
 
+  const playAvatarRef = useRef(playAvatar);
+  const playRouteRef = useRef<Array<{ x: number; z: number }> | null>(null);
+  const [playReplan, setPlayReplan] = useState(0);
+  const [playFocused, setPlayFocused] = useState(false);
+  const playMarkerOf = (caseId: string | null) => HANGAR_PLAY_LAYOUT.markers.find(marker => marker.caseId === caseId) ?? null;
+  const playModelOf = (caseId: string) => HANGAR_AIRCRAFT_MODELS[caseId] ?? caseId;
+  const setPlayRouteState = (points: Array<{ x: number; z: number }> | null) => { playRouteRef.current = points; setPlayRoute(points); };
+  const focusHangarStage = () => hangarStageRef.current?.focus({ preventScroll: true });
+
+  function arriveAtHangarAircraft(caseId: string) {
+    const marker = playMarkerOf(caseId);
+    if (!marker) return;
+    setPlayGuideCaseId(null);
+    setPlayRouteState(null);
+    setPlayArrivedCaseId(caseId);
+    setPlayLive(`Arrived at ${playModelOf(caseId)}.`);
+    setHangarSelectedObjectId(marker.aircraftId);
+    setHangarSelectedCaseId(caseId);
+    sharedHangarAircraftSelectionHandler(marker.aircraftId);
+  }
+
+  function guideToHangarAircraft(caseId: string) {
+    const marker = playMarkerOf(caseId);
+    setPlayDossiersOpen(false);
+    if (!marker) return;
+    setPlayArrivedCaseId(null);
+    setHangarSelectedCaseId(caseId);
+    if (Math.hypot(playAvatarRef.current.x - marker.marker.x, playAvatarRef.current.z - marker.marker.z) <= HANGAR_ROUTE_ARRIVAL_THRESHOLD) {
+      arriveAtHangarAircraft(caseId);
+    } else {
+      setPlayGuideCaseId(caseId);
+      setPlayRouteState(null);
+      playLastPlan.current = 0;
+      setPlayReplan(count => count + 1);
+      setPlayLive(`Guide line to ${playModelOf(caseId)}: ${getHangarRouteLiveDirection(playAvatarRef.current, marker.marker, 0).liveText}.`);
+    }
+    focusHangarStage();
+  }
+
+  function clearHangarGuide() {
+    setPlayGuideCaseId(null);
+    setPlayRouteState(null);
+    setPlayLive('Guide line cleared.');
+  }
+
+  function walkHangarAvatar(key: string) {
+    const result = stepHangarAvatar(playAvatarRef.current, key, 0, HANGAR_PLAY_LAYOUT);
+    if (!result || !result.accepted) return;
+    const position = result.position;
+    playAvatarRef.current = position;
+    setPlayAvatar(position);
+    const inZone = isInHangarRackZone(position, HANGAR_PLAY_LAYOUT);
+    if (inZone && !playInRackZone.current) setPlayDossiersOpen(true);
+    playInRackZone.current = inZone;
+    const marker = playMarkerOf(playGuideCaseId);
+    if (!marker) return;
+    if (Math.hypot(position.x - marker.marker.x, position.z - marker.marker.z) <= HANGAR_ROUTE_ARRIVAL_THRESHOLD) {
+      arriveAtHangarAircraft(marker.caseId);
+      return;
+    }
+    setPlayLive(getHangarRouteLiveDirection(position, marker.marker, 0).liveText);
+    const current = playRouteRef.current;
+    const advanced = current ? advanceHangarPlayRoute(position, current, HANGAR_PLAY_LAYOUT) : null;
+    if (!advanced) setPlayReplan(count => count + 1);
+    else if (!current || advanced.length !== current.length || advanced[0] !== current[0]) setPlayRouteState(advanced);
+  }
+
+  const handleHangarStageKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault();
+      walkHangarAvatar(event.key);
+    } else if ((event.key === 'e' || event.key === 'E' || event.key === 'Enter') && isInHangarRackZone(playAvatarRef.current, HANGAR_PLAY_LAYOUT)) {
+      event.preventDefault();
+      setPlayDossiersOpen(true);
+    } else if (event.key === 'Escape' && playGuideCaseId) {
+      event.preventDefault();
+      clearHangarGuide();
+    }
+  };
+
+  const handleHangarDossierKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const buttons = playDossierButtons.current.filter((button): button is HTMLButtonElement => !!button);
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    let next = -1;
+    if (event.key === 'ArrowDown') next = (index + 1) % buttons.length;
+    else if (event.key === 'ArrowUp') next = (index - 1 + buttons.length) % buttons.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = buttons.length - 1;
+    else if (event.key === 'Escape') {
+      event.preventDefault();
+      setPlayDossiersOpen(false);
+      focusHangarStage();
+      return;
+    }
+    if (next >= 0 && buttons[next]) {
+      event.preventDefault();
+      buttons[next].focus();
+    }
+  };
+
+  // Full replans are throttled because the grid search is the expensive part; cheap advances happen per step.
+  useEffect(() => {
+    const marker = playMarkerOf(playGuideCaseId);
+    if (!marker) return;
+    const elapsed = nowFrom() - playLastPlan.current;
+    const timer = setTimeout(() => {
+      playLastPlan.current = nowFrom();
+      const planned = planHangarPlayRoute(playAvatarRef.current, marker.marker, 0, HANGAR_PLAY_LAYOUT);
+      if (planned.status === 'route') setPlayRouteState(planned.points);
+      else if (planned.status === 'arrival') arriveAtHangarAircraft(marker.caseId);
+      else { setPlayRouteState(null); setPlayLive(`No walkable route to ${playModelOf(marker.caseId)} from here.`); }
+    }, Math.max(0, HANGAR_ROUTE_REPLAN_MS - elapsed));
+    return () => clearTimeout(timer);
+  }, [playGuideCaseId, playReplan]);
+
+  useEffect(() => {
+    if (!playDossiersOpen) return;
+    const selectedIndex = Math.max(0, hangarEntries.findIndex(entry => entry.caseId === hangarSelectedCaseId));
+    playDossierButtons.current[selectedIndex]?.focus();
+  }, [playDossiersOpen]);
+
+  useEffect(() => {
+    if (hangarView === '3d' && hangarSceneLoaded) focusHangarStage();
+  }, [hangarView, hangarSceneLoaded]);
+
+  const playFollowPose = useMemo(() => hangarFollowEnabled
+    ? { target: { x: playAvatar.x, y: 1, z: playAvatar.z }, radius: HANGAR_FOLLOW_DEFAULT_RADIUS, azimuthDegrees: 0, polarDegrees: HANGAR_FOLLOW_DEFAULT_POLAR_DEGREES }
+    : null, [hangarFollowEnabled, playAvatar.x, playAvatar.z]);
+
   const caseViewOf = (caseId: string) => {
     const envelope = hangarSceneEnvelopes[caseId];
     return isRecord(envelope) && isRecord(envelope.case) ? envelope.case : null;
@@ -727,7 +877,17 @@ export default function HangarMode({
                 <button type="button" className="hangar-btn hangar-btn--toggle" aria-pressed={hangarFollowEnabled} onClick={toggleFollowCamera}>{hangarFollowEnabled ? 'Follow avatar: on' : 'Follow avatar: off'}</button>
               </div>
             </div>
-            <div className="hangar-stage" aria-label="Hangar 3D scene">
+            <div
+              ref={hangarStageRef}
+              className={`hangar-stage${playFocused ? ' hangar-stage--active' : ''}`}
+              aria-label="Hangar 3D scene"
+              aria-describedby="hangar-play-hint"
+              tabIndex={0}
+              onKeyDown={handleHangarStageKeyDown}
+              onFocus={event => { if (event.target === event.currentTarget) setPlayFocused(true); }}
+              onBlur={event => { if (event.target === event.currentTarget) setPlayFocused(false); }}
+              onPointerDown={event => { if (!(event.target as HTMLElement).closest('button, a, [role="dialog"]')) focusHangarStage(); }}
+            >
               {hangarStale && <p className="hangar-stage__banner" role="status">Showing the last loaded scene. Refresh to try again.</p>}
               <HangarErrorBoundary snapshot={hangarSnapshot} lastSnapshot={hangarSnapshot} onError={handleHangarRenderError}>
                 {LoadedHangarScene ? (
@@ -746,6 +906,9 @@ export default function HangarMode({
                       snapshot: hangarSnapshot,
                     } as Record<string, unknown>)}
                     cameraPreset={cameraPreset}
+                    avatarTarget={playAvatar}
+                    followPose={playFollowPose}
+                    route={playRoute && playRoute.length >= 2 ? playRoute : null}
                     selectedObjectId={hangarSelectedObjectId}
                     onSelect={handleSceneSelect}
                     onCreated={handleHangarCanvasCreated}
@@ -753,6 +916,45 @@ export default function HangarMode({
                   />
                 ) : <canvas aria-label="3D hangar scene" />}
               </HangarErrorBoundary>
+              <div className="hangar-hud">
+                <p id="hangar-play-hint" className="hangar-hud__hint">
+                  {playFocused
+                    ? 'Arrow keys walk. Walk onto the green pad at the data rack (green beacon) to open the aircraft dossiers. Escape clears the guide line.'
+                    : 'Click the hangar, then use the arrow keys to walk.'}
+                </p>
+                {playGuideCaseId && <p className="hangar-hud__guide">Follow the green line to {playModelOf(playGuideCaseId)}: {playLive}</p>}
+              </div>
+              <p className="hangar-visually-hidden" aria-live="polite" data-hangar-play-live="true">{playLive}</p>
+              {playArrivedCaseId && (
+                <div className="hangar-hud__toast" data-hangar-play-arrival={playArrivedCaseId}>
+                  <span>Arrived at {playModelOf(playArrivedCaseId)}.</span>
+                  {onOpenCase && <button type="button" className="hangar-btn hangar-btn--primary" onClick={() => onOpenCase(playArrivedCaseId)}>Open {playModelOf(playArrivedCaseId)} journey</button>}
+                  <button type="button" className="hangar-btn hangar-btn--quiet" onClick={() => { setPlayArrivedCaseId(null); focusHangarStage(); }}>Dismiss</button>
+                </div>
+              )}
+              {playDossiersOpen && (
+                <div className="hangar-dossiers" role="dialog" aria-modal="true" aria-labelledby="hangar-dossiers-heading" onKeyDown={handleHangarDossierKeyDown}>
+                  <div className="hangar-dossiers__header">
+                    <div>
+                      <p className="hangar-card__eyebrow">Data rack</p>
+                      <h3 id="hangar-dossiers-heading" className="hangar-dossiers__title">Aircraft dossiers</h3>
+                      <p className="hangar-muted">Choose an aircraft and follow the green guide line to it.</p>
+                    </div>
+                    <button type="button" className="hangar-btn hangar-btn--quiet" onClick={() => { setPlayDossiersOpen(false); focusHangarStage(); }}>Close dossiers</button>
+                  </div>
+                  <ul className="hangar-dossiers__list">
+                    {hangarEntries.map((entry, index) => (
+                      <li key={entry.caseId} className="hangar-dossier">
+                        <span className="hangar-case__model">{modelOf(entry)}</span>
+                        <span className="hangar-case__meta">{entry.name} – {entry.category}</span>
+                        {statusPill(entry.caseId)}
+                        <span className="hangar-case__meta">Next: {nextActionText(caseViewOf(entry.caseId))}</span>
+                        <button type="button" ref={element => { playDossierButtons.current[index] = element; }} className="hangar-btn hangar-btn--primary" onClick={() => guideToHangarAircraft(entry.caseId)}>Guide me to {modelOf(entry)}</button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <ul className="hangar-legend" aria-label="Status colours">
                 <li><span className="hangar-dot hangar-dot--done" aria-hidden="true" />Complete</li>
                 <li><span className="hangar-dot hangar-dot--human" aria-hidden="true" />Waiting for a person</li>
