@@ -133,8 +133,8 @@ public static class CopilotMcp
         var provenance = http.Items[ProvenanceKey] is CopilotProvenance set ? set : CopilotProvenance.McpDirect;
         var result = await CopilotInvocation.RunAsync(services.GetRequiredService<ICopilotInvocationLedger>(), services.GetRequiredService<ICaseStateStore>(),
             session, name, provenance, args?.CaseId,
-            (admission, _) => !known ? Task.FromResult(Fail(400, "unknown_tool")) : args is null ? Task.FromResult(Fail(400, "invalid_request"))
-                : session is null ? Task.FromResult(Fail(401, "unauthenticated")) : Execute(name, args, session, http, admission), cancellationToken);
+            (admission, token) => !known ? Task.FromResult(Fail(400, "unknown_tool")) : args is null ? Task.FromResult(Fail(400, "invalid_request"))
+                : session is null ? Task.FromResult(Fail(401, "unauthenticated")) : Execute(name, args, session, http, admission, token), cancellationToken);
         return result as ToolResult ?? (ToolResult)Fail(StatusCodes.Status503ServiceUnavailable, "audit_unavailable").Result;
     }
 
@@ -180,7 +180,8 @@ public static class CopilotMcp
         return (true, valid ? args : null);
     }
 
-    private static Task<CopilotInvocationResult> Execute(string name, ToolArgs args, DemoSession session, HttpContext http, CopilotAdmission admission)
+    private static Task<CopilotInvocationResult> Execute(string name, ToolArgs args, DemoSession session, HttpContext http, CopilotAdmission admission,
+        CancellationToken cancellationToken)
     {
         var projections = http.RequestServices.GetRequiredService<CopilotProjections>();
         return name switch
@@ -189,7 +190,7 @@ public static class CopilotMcp
             "advance_stage" => Task.FromResult(AdvanceStage(args, session, http, admission)),
             "get_case_summary" => Task.FromResult(FromHttp(CopilotProjectionEndpoints.ToResult(projections.Summary(session, args.CaseId!)), http)),
             "get_open_points" => Task.FromResult(FromHttp(CopilotProjectionEndpoints.ToResult(projections.OpenPoints(session, args.CaseId!)), http)),
-            _ => ReadSource(args, http),
+            _ => ReadSource(args, http, cancellationToken),
         };
     }
 
@@ -233,7 +234,7 @@ public static class CopilotMcp
         return Succeed(new JsonObject { ["contractVersion"] = CopilotProjections.ContractVersion, ["cases"] = listed });
     }
 
-    private static async Task<CopilotInvocationResult> ReadSource(ToolArgs args, HttpContext http)
+    private static async Task<CopilotInvocationResult> ReadSource(ToolArgs args, HttpContext http, CancellationToken cancellationToken)
     {
         var services = http.RequestServices;
         var sessions = services.GetRequiredService<DemoSessionStore>();
@@ -247,7 +248,12 @@ public static class CopilotMcp
             services.GetRequiredService<ILogger<SourceReadBudget>>(), services.GetRequiredService<IHostEnvironment>()), http);
         if (read.Result is not ToolResult { IsError: false } success) return read;
         var envelope = success.Structured["result"]!.AsObject();
-        var records = envelope["records"] is JsonArray list ? list.Select(item => item!) : [envelope["record"]!];
+        JsonNode[] records = envelope["records"] is JsonArray list ? [.. list.Select(item => item!)] : [envelope["record"]!];
+        // Platform screening runs only after an authorized, successful read; the verdict stays on the untrusted records
+        // and never enters modelSafe, so the model cannot see whether a record was flagged.
+        var verdicts = await services.GetRequiredService<ICopilotRecordScreener>().ScreenAsync(
+            [.. records.Select(ScreeningInput)], ScreeningScope.For(http), cancellationToken);
+        for (var i = 0; i < records.Length; i++) records[i]["screening"] = verdicts[i].ToJson();
         var refs = new JsonArray([.. records.Select(record => new JsonObject
         {
             ["sourceId"] = (string?)record["sourceId"], ["recordId"] = (string?)record["recordId"], ["recordVersion"] = (int?)record["recordVersion"],
@@ -259,6 +265,16 @@ public static class CopilotMcp
             ["caseId"] = args.CaseId, ["sourceId"] = args.SourceId, ["outcome"] = "ok", ["refs"] = refs,
         };
         return read with { Result = success with { Untrusted = true } };
+    }
+
+    // The string fields of a typed payload ({"fields":{...}}), or of the payload itself when it is flat.
+    private static ScreeningRecord ScreeningInput(JsonNode record)
+    {
+        var payload = record["payload"] as JsonObject;
+        var fields = (payload?["fields"] as JsonObject ?? payload ?? [])
+            .Where(field => field.Value is JsonValue value && value.GetValueKind() == JsonValueKind.String)
+            .ToDictionary(field => field.Key, field => field.Value!.GetValue<string>(), StringComparer.Ordinal);
+        return new((string?)record["sourceId"] ?? "", (string?)record["recordId"] ?? "", (int?)record["recordVersion"] ?? 0, fields);
     }
 
     // Adapts an existing direct-route result without changing its body; a bodyless 404 is the fixed case_not_found.

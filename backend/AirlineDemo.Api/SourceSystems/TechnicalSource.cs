@@ -14,6 +14,9 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
 
     private readonly IReadOnlyList<SourceRecord<TPayload>> _records;
 
+    // The committed, manifest-verified records, for synchronous identity lookups that are not source reads.
+    protected IReadOnlyList<SourceRecord<TPayload>> Records => _records;
+
     protected FixtureSourceSystem(
         string sourceId,
         string resourceName,

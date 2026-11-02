@@ -34,6 +34,13 @@ public sealed class CopilotProjectionTests : IAsyncDisposable
     private readonly WebApplicationFactory<Program> _factory;
     private readonly HttpClient _client;
     private CountingCaseStore? _counter;
+    private readonly FakeTaskCards _cards = new();
+
+    private sealed class FakeTaskCards : ICopilotTaskCards
+    {
+        public Dictionary<string, (string, int)[]> Cards { get; } = [];
+        public IReadOnlyList<(string RecordId, int RecordVersion)> TaskCards(string caseId) => Cards.GetValueOrDefault(caseId, []);
+    }
 
     public CopilotProjectionTests()
     {
@@ -49,6 +56,7 @@ public sealed class CopilotProjectionTests : IAsyncDisposable
             }));
             builder.ConfigureTestServices(services =>
             {
+                services.AddSingleton<ICopilotTaskCards>(_cards);
                 var descriptor = services.Last(item => item.ServiceType == typeof(ICaseStateStore));
                 services.Remove(descriptor);
                 services.AddSingleton<ICaseStateStore>(provider =>
@@ -196,6 +204,35 @@ public sealed class CopilotProjectionTests : IAsyncDisposable
             .Set(scope, "presenter", "copilot-mode-1", store.Read(scope).Revision, "technical", "unavailable").Outcome);
         Assert.Equal("blocked", (string?)(await Points("technical-reviewer", "cp-case-a"))["points"]![0]!["state"]);
         Assert.Equal("open", (string?)(await Points("legal-reviewer", "cp-case-a"))["points"]![0]!["state"]);
+    }
+
+    [Fact]
+    public async Task OpenPoints_NoPins_ReferencesTaskCard()
+    {
+        Assert.Equal([("mx-task-card-001", 1)], new MaintenanceSource().TaskCards("case-001"));
+        Assert.Empty(new MaintenanceSource().TaskCards("case-a"));
+        _cards.Cards["cp-case-c"] = [("mx-task-card-001", 1)];
+        var technical = await Ok("/api/v1/cases/cp-case-c/copilot/open-points", Session("technical-reviewer", CpCases));
+        Assert.Equal("""[{"sourceId":"maintenance","recordId":"mx-task-card-001","recordVersion":1}]""", technical["points"]![0]!["sourceRefs"]!.ToJsonString());
+        foreach (var role in new[] { "finance-reviewer", "legal-reviewer" })
+            Assert.Equal("[]", (await Ok("/api/v1/cases/cp-case-c/copilot/open-points", Session(role, CpCases)))["points"]![0]!["sourceRefs"]!.ToJsonString());
+
+        // With basis pins, the pins are used and no task card is added.
+        Commit("cp-case-c", "test.basis", "{}", """{"format":"source-record-pins-v1","pins":[{"sourceId":"technical","recordId":"T-1","recordVersion":2}]}""");
+        Assert.Equal("""[{"sourceId":"technical","recordId":"T-1","recordVersion":2}]""",
+            (await Ok("/api/v1/cases/cp-case-c/copilot/open-points", Session("technical-reviewer", CpCases)))["points"]![0]!["sourceRefs"]!.ToJsonString());
+    }
+
+    [Fact]
+    public async Task OpenPoints_MaintenanceUnavailable_NoTaskCardRef()
+    {
+        _cards.Cards["cp-case-c"] = [("mx-task-card-001", 1)];
+        var (store, scope) = Scope("cp-case-c");
+        Assert.Equal(SourceModeOutcome.Recorded, _factory.Services.GetRequiredService<SourceModeStore>()
+            .Set(scope, "presenter", "copilot-mode-mx", store.Read(scope).Revision, "maintenance", "unavailable").Outcome);
+        var technical = await Ok("/api/v1/cases/cp-case-c/copilot/open-points", Session("technical-reviewer", CpCases));
+        Assert.Equal("REQ-1", (string?)technical["points"]![0]!["pointId"]);
+        Assert.Equal("[]", technical["points"]![0]!["sourceRefs"]!.ToJsonString());
     }
 
     [Fact]
