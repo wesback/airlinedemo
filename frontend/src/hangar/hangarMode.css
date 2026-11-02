@@ -183,8 +183,8 @@
 
 .hangar-stage {
   position: relative;
-  min-height: 62vh;
-  height: 62vh;
+  min-height: 560px;
+  height: 78vh;
   overflow: hidden;
   border-radius: var(--av-radius-l);
   border: 1px solid var(--av-navy-3);
@@ -680,3 +680,107 @@
 }
 .hangar-card--journey li > button:not(:first-child):hover { border-color: var(--av-green); color: var(--av-text); }
 .hangar-journey__future { font-style: italic; }
+
+.hangar-stage:focus-visible,
+.hangar-stage--active {
+  outline: 2px solid var(--av-green);
+  outline-offset: 2px;
+}
+
+.hangar-hud {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  pointer-events: none;
+}
+
+.hangar-hud__hint,
+.hangar-hud__guide {
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: var(--av-radius-s);
+  background: rgba(8, 20, 40, 0.78);
+  color: var(--av-on-navy);
+  font-size: 0.8125rem;
+}
+
+.hangar-hud__guide {
+  border-left: 4px solid var(--av-green);
+  font-weight: 600;
+}
+
+.hangar-hud__toast {
+  position: absolute;
+  z-index: 3;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--av-radius-m, var(--av-radius-s));
+  background: var(--av-surface);
+  color: var(--av-text);
+  box-shadow: var(--av-shadow-lift);
+}
+
+.hangar-dossiers {
+  position: absolute;
+  z-index: 4;
+  inset: 8% 10%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 14px;
+  padding: 20px;
+  overflow: auto;
+  border-radius: var(--av-radius-l);
+  border: 2px solid var(--av-green);
+  background: rgba(8, 20, 40, 0.94);
+  color: var(--av-on-navy);
+  box-shadow: var(--av-shadow-lift);
+}
+
+.hangar-dossiers__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+
+.hangar-dossiers__title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.hangar-dossiers .hangar-muted,
+.hangar-dossiers .hangar-case__meta {
+  color: var(--av-on-navy);
+}
+
+.hangar-dossiers__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hangar-dossier {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 14px;
+  border-radius: var(--av-radius-s);
+  border: 1px solid var(--av-navy-3);
+  background: var(--av-navy-2);
+}
+
+.hangar-dossier:focus-within {
+  border-color: var(--av-green);
+}

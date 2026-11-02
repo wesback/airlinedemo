@@ -109,49 +109,99 @@ function pointInsideFloor(x: number, z: number, m: any): boolean {
 
 function buildAircraft(layout: any, model: any): THREE.Group {
   const { length, span, height } = layout.dimensions as { length: number; span: number; height: number };
-  const aircraft = new THREE.Group(); aircraft.name = model.nodes.aircraft;
-  const letter = model.nodes.aircraft.slice(-1);
+  const name = model.nodes.aircraft as string;
+  const aircraft = new THREE.Group(); aircraft.name = name;
+  const letter = name.slice(-1);
   const objectId = model.nodes.objectIds[0];
-
-  const fuselage = new THREE.Mesh(new THREE.CapsuleGeometry(span * 0.105, length * 0.68, 8, 12), material(HANGAR_SCENE_THEME.aircraftBody));
-  fuselage.name = `${model.nodes.aircraft}Fuselage`; fuselage.rotation.x = Math.PI / 2; aircraft.add(fuselage);
-  box(`${model.nodes.aircraft}WingLeft`, [span * 0.46, 0.3, length * 0.38], [-span * 0.25, height * 0.32, 0], material(HANGAR_SCENE_THEME.aircraftBody), aircraft);
-  box(`${model.nodes.aircraft}WingRight`, [span * 0.46, 0.3, length * 0.38], [span * 0.25, height * 0.32, 0], material(HANGAR_SCENE_THEME.aircraftBody), aircraft);
-  box(`${model.nodes.aircraft}Stabiliser`, [span * 0.42, 0.18, length * 0.16], [0, height * 0.58, -length * 0.38], material(HANGAR_SCENE_THEME.aircraftBody), aircraft);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(span * 0.08, height * 0.3, length * 0.16), material(HANGAR_SCENE_THEME.aircraftBody));
-  fin.name = `${model.nodes.aircraft}Fin`; fin.position.set(0, height * 0.72, -length * 0.38); aircraft.add(fin);
-
   const regional = model.category === 'regional';
-  if (regional) {
-    fin.position.set(0, height * 0.62, -length * 0.39); fin.scale.y = 0.5;
-  }
+  const body = material(HANGAR_SCENE_THEME.aircraftBody);
+  const trim = material(HANGAR_SCENE_THEME.aircraftTrim);
+  const glass = material(HANGAR_SCENE_THEME.rack);
+  const livery = material(HANGAR_SCENE_THEME.avatarBody);
+
+  // Proportions of a generic airliner; the group is normalised to the manifest dimensions afterwards.
+  const r = length * 0.06;
+  const gearHeight = height * (regional ? 0.16 : 0.2);
+  const fy = gearHeight + r;
+  const fuselage = new THREE.Mesh(new THREE.CapsuleGeometry(r, length - 2 * r, 10, 20), body);
+  fuselage.name = `${name}Fuselage`; fuselage.rotation.x = Math.PI / 2; fuselage.position.y = fy; aircraft.add(fuselage);
+  box(`${name}Cockpit`, [r * 1.1, r * 0.22, r * 0.5], [0, fy + r * 0.62, length / 2 - r * 0.85], glass, aircraft);
   for (const side of [-1, 1]) {
-    const gear = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, height * 0.25, 8), material(HANGAR_SCENE_THEME.aircraftTrim));
-    gear.name = `${model.nodes.aircraft}LandingGear${side < 0 ? 'Left' : 'Right'}`; gear.position.set(side * span * 0.27, height * 0.14, 0); aircraft.add(gear);
-    if (side < 0) continue;
-    const engine = new THREE.Mesh(new THREE.CapsuleGeometry(Math.min(span, length) * 0.07, height * 0.55, 8, 12), material(HANGAR_SCENE_THEME.aircraftTrim));
-    engine.name = `RightEngine${letter}`; engine.rotation.x = Math.PI / 2; engine.position.set(side * span * 0.27, height * 0.26, length * 0.05); aircraft.add(engine);
+    const label = side < 0 ? 'Left' : 'Right';
+    box(`${name}Windows${label}`, [0.06, r * 0.16, length * 0.62], [side * r * 0.97, fy + r * 0.3, length * 0.02], glass, aircraft);
+    box(`${name}Stripe${label}`, [0.06, r * 0.1, length * 0.72], [side * r * 0.99, fy - r * 0.12, 0], livery, aircraft);
   }
+
+  const chord = length * (regional ? 0.12 : 0.15);
+  const thickness = Math.max(0.18, r * 0.14);
+  const semiSpan = span / 2 - r * 0.5;
+  const sweep = regional ? 0.08 : 0.42;
+  const wingY = regional ? fy + r * 0.78 : fy - r * 0.55;
+  const wingZ = -length * 0.03;
+  const wingCentreX = r * 0.5 + semiSpan / 2;
+  for (const side of [-1, 1]) {
+    const wing = box(`${name}Wing${side < 0 ? 'Left' : 'Right'}`, [semiSpan, thickness, chord], [side * wingCentreX, wingY, wingZ], body, aircraft);
+    wing.rotation.y = -side * sweep;
+  }
+
+  const tailZ = -length / 2 + length * 0.1;
+  const finBase = fy + r * 0.5;
+  const finHeight = height - finBase;
+  const fin = box(`${name}Fin`, [Math.max(0.22, r * 0.14), finHeight, length * 0.14], [0, finBase + finHeight / 2, tailZ], livery, aircraft);
+  fin.rotation.x = -0.28;
+  const stabiliserY = regional ? height - 0.2 : fy + r * 0.25;
+  const stabiliser = box(`${name}Stabiliser`, [span * (regional ? 0.3 : 0.36), 0.16, length * 0.08], [0, stabiliserY, regional ? tailZ - length * 0.05 : tailZ - length * 0.02], body, aircraft);
+  stabiliser.name = `${name}Stabiliser`;
+
+  // Engine under the right wing; the left one is the manifest's engine node (buildEngine mirrors this one).
+  const engineRadius = r * (regional ? 0.42 : 0.5);
+  const engineLength = length * 0.16;
+  const engineX = regional ? r + engineRadius + 0.4 : span * 0.18;
+  const wingZAtEngine = wingZ + (engineX - wingCentreX) * Math.tan(sweep);
+  const engineY = Math.max(engineRadius + 0.3, wingY - thickness / 2 - 0.12 - engineRadius);
+  const engine = new THREE.Mesh(new THREE.CylinderGeometry(engineRadius, engineRadius * 0.82, engineLength, 20), trim);
+  engine.name = `RightEngine${letter}`; engine.rotation.x = Math.PI / 2; engine.position.set(engineX, engineY, wingZAtEngine + chord * 0.45); aircraft.add(engine);
+  const intake = new THREE.Mesh(new THREE.CylinderGeometry(engineRadius * 0.78, engineRadius * 0.78, 0.04, 20), glass);
+  intake.name = `RightEngine${letter}Intake`; intake.rotation.x = Math.PI / 2; intake.position.set(engineX, engineY, engine.position.z + engineLength / 2 + 0.01); aircraft.add(intake);
+
+  const wheelRadius = Math.max(0.25, gearHeight * 0.28);
+  for (const [label, x, z] of [['Left', -r * 0.85, -length * 0.05], ['Right', r * 0.85, -length * 0.05], ['Nose', 0, length / 2 - length * 0.12]] as Array<[string, number, number]>) {
+    const strutTop = fy - r * (label === 'Nose' ? 0.8 : 0.6);
+    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, strutTop - wheelRadius, 8), trim);
+    strut.name = `${name}LandingGear${label}`; strut.position.set(x, wheelRadius + (strutTop - wheelRadius) / 2, z); aircraft.add(strut);
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(wheelRadius, wheelRadius, 0.3, 14), glass);
+    wheel.name = `${name}Wheel${label}`; wheel.rotation.z = Math.PI / 2; wheel.position.set(x, wheelRadius, z); aircraft.add(wheel);
+  }
+
   aircraft.updateMatrixWorld(true);
   let bounds = new THREE.Box3().setFromObject(aircraft);
-  let size = bounds.getSize(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
   aircraft.scale.set(span / Math.max(size.x, 0.001), height / Math.max(size.y, 0.001), length / Math.max(size.z, 0.001));
   aircraft.updateMatrixWorld(true);
   bounds = new THREE.Box3().setFromObject(aircraft);
-  aircraft.position.set(layout.centre.x, -bounds.min.y, layout.centre.z);
+  aircraft.position.set(layout.centre.x - (bounds.min.x + bounds.max.x) / 2, -bounds.min.y, layout.centre.z - (bounds.min.z + bounds.max.z) / 2);
   aircraft.updateMatrixWorld(true);
   fuselage.userData.objectId = objectId;
   return aircraft;
 }
 
-function buildEngine(layout: any, model: any, parent: THREE.Group) {
-  const nodes = model.nodes; const { length, span, height } = layout.dimensions;
+function buildEngine(layout: any, model: any, parent: THREE.Group, aircraft: THREE.Group) {
+  const nodes = model.nodes;
   const engine = new THREE.Group(); engine.name = nodes.engine;
-  const visible = new THREE.Mesh(new THREE.CapsuleGeometry(Math.min(span, length) * 0.07, height * 0.55, 8, 12), material(HANGAR_SCENE_THEME.aircraftTrim));
-  visible.name = `${nodes.engine}Visible`; visible.rotation.x = Math.PI / 2; visible.userData.objectId = nodes.objectIds[1]; engine.add(visible);
-  visible.position.set(layout.centre.x - span * 0.27, height * 0.26, layout.centre.z + length * 0.05);
+  const right = aircraft.getObjectByName(`RightEngine${nodes.aircraft.slice(-1)}`) as THREE.Mesh;
+  const rightIntake = aircraft.getObjectByName(`RightEngine${nodes.aircraft.slice(-1)}Intake`) as THREE.Mesh;
+  const mirror = (mesh: THREE.Mesh, meshName: string, mat: THREE.Material) => {
+    const position = mesh.getWorldPosition(new THREE.Vector3());
+    const copy = new THREE.Mesh(mesh.geometry.clone(), mat);
+    copy.name = meshName; copy.rotation.x = mesh.rotation.x; copy.rotation.y = mesh.rotation.y; copy.rotation.z = mesh.rotation.z; copy.scale.copy(aircraft.scale);
+    copy.position.set(2 * layout.centre.x - position.x, position.y, position.z);
+    engine.add(copy); return copy;
+  };
+  const visible = mirror(right, `${nodes.engine}Visible`, material(HANGAR_SCENE_THEME.aircraftTrim));
+  visible.userData.objectId = nodes.objectIds[1];
+  mirror(rightIntake, `${nodes.engine}Intake`, material(HANGAR_SCENE_THEME.rack));
   visible.geometry.computeBoundingSphere();
-  const visibleRadius = visible.geometry.boundingSphere?.radius ?? 0;
+  const visibleRadius = (visible.geometry.boundingSphere?.radius ?? 0) * Math.max(aircraft.scale.x, aircraft.scale.y, aircraft.scale.z);
   const pickRadius = Math.max(1, 1.25 * visibleRadius);
   const pickMaterial = material(HANGAR_SCENE_THEME.groundShadow, true); pickMaterial.visible = false;
   const pick = new THREE.Mesh(new THREE.SphereGeometry(pickRadius, 12, 8), pickMaterial);
@@ -206,6 +256,31 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
     unitMesh.position.x = rackFootprint.minX + (i + 0.5) * ((rackFootprint.maxX - rackFootprint.minX) / 5);
   }
 
+  const rackCentreX = (rackFootprint.minX + rackFootprint.maxX) / 2;
+  const rackCentreZ = (rackFootprint.minZ + rackFootprint.maxZ) / 2;
+  for (let i = 0; i < 5; i++) {
+    const led = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), material(HANGAR_SCENE_THEME.guideLine, true));
+    led.name = `RackLed${i}`; led.position.set(rackFootprint.minX + (i + 0.5) * ((rackFootprint.maxX - rackFootprint.minX) / 5), 1.95, rackFootprint.maxZ + 0.02); rackGroup.add(led);
+  }
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.4, 8), material(HANGAR_SCENE_THEME.aircraftTrim));
+  pole.name = 'RackBeaconPole'; pole.position.set(rackCentreX, m.layout.rack.height + 1.2, rackCentreZ); rackGroup.add(pole);
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 12), material(HANGAR_SCENE_THEME.guideLine, true));
+  beacon.name = 'RackBeacon'; beacon.position.set(rackCentreX, m.layout.rack.height + 2.5, rackCentreZ); rackGroup.add(beacon);
+  const zone = m.layout.interactionCircle;
+  if (zone?.centre && Number.isFinite(zone.radius)) {
+    const pad = new THREE.Mesh(new THREE.CircleGeometry(zone.radius, 40), material(HANGAR_SCENE_THEME.guideLine, true, 0.28));
+    pad.name = 'RackInteractionPad'; pad.rotation.x = -Math.PI / 2; pad.position.set(zone.centre.x, 0.03, zone.centre.z); rackGroup.add(pad);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(zone.radius, 0.05, 6, 48), material(HANGAR_SCENE_THEME.guideLine, true));
+    rim.name = 'RackInteractionRim'; rim.rotation.x = -Math.PI / 2; rim.position.set(zone.centre.x, 0.04, zone.centre.z); rackGroup.add(rim);
+  }
+
+  const walls = new THREE.Group(); walls.name = 'FloorWalls'; root.add(walls);
+  const halfWidth = m.layout.floorSlab.width / 2, halfDepth = m.layout.floorSlab.depth / 2, wallHeight = 14;
+  const wallMaterial = material(HANGAR_SCENE_THEME.partsStand);
+  box('FloorWallBack', [m.layout.floorSlab.width, wallHeight, 0.4], [0, wallHeight / 2, -halfDepth - 0.2], wallMaterial, walls);
+  box('FloorWallLeft', [0.4, wallHeight, m.layout.floorSlab.depth], [-halfWidth - 0.2, wallHeight / 2, 0], wallMaterial, walls);
+  box('FloorWallRight', [0.4, wallHeight, m.layout.floorSlab.depth], [halfWidth + 0.2, wallHeight / 2, 0], wallMaterial, walls);
+
   const avatarStart = m.layout.avatarStart;
   const avatar = new THREE.Group(); avatar.name = 'Avatar'; avatar.position.set(avatarStart.x, 0, avatarStart.z); root.add(avatar);
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.425, 0.85, 8, 12), material(HANGAR_SCENE_THEME.avatarBody));  body.name = 'AvatarBody'; body.position.y = 0.85; avatar.add(body);
@@ -213,13 +288,15 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
   head.name = 'AvatarHead'; head.position.y = 1.56; avatar.add(head);
   const hardHat = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), material(m.avatar.hardHat.color));
   hardHat.name = m.avatar.hardHat.node; hardHat.position.y = 1.86; hardHat.scale.y = 0.55; avatar.add(hardHat);
+  const locator = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.06, 6, 32), material(m.avatar.hardHat.color, true));
+  locator.name = 'AvatarLocator'; locator.rotation.x = -Math.PI / 2; locator.position.y = 0.04; avatar.add(locator);
 
   for (let i = 0; i < 3; i++) {
     const model = m.aircraft.models[i], layout = m.layout.aircraft[i];
     const caseGroup = new THREE.Group(); caseGroup.name = `Case${model.nodes.aircraft.slice(-1)}`; caseGroup.userData.caseId = layout.caseId;
     const aircraft = buildAircraft(layout, model); caseGroup.add(aircraft);
 
-    buildEngine(layout, model, caseGroup);
+    buildEngine(layout, model, caseGroup, aircraft);
     const standX = layout.centre.x - 0.3 * layout.dimensions.span;
     const standZ = layout.centre.z + 0.3 * layout.dimensions.length;
     const stand = new THREE.Group(); stand.name = `PartsStand${model.nodes.aircraft.slice(-1)}`; stand.position.set(standX, 0, standZ); caseGroup.add(stand);
@@ -254,8 +331,11 @@ export function buildHangarAircraftSceneGroups(manifest: unknown = manifestDefau
   }
   if (route && route.length >= 2) {
     const curve = new THREE.CatmullRomCurve3(route.map(point => new THREE.Vector3(point.x, 0.05, point.z)));
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(2, route.length * 12), 0.08, 8, false), material(HANGAR_SCENE_THEME.guideLine));
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(2, route.length * 12), 0.16, 8, false), material(HANGAR_SCENE_THEME.guideLine, true));
     tube.name = 'GuideLine'; tube.userData.routePoints = route.map(point => ({x: point.x, y: 0.05, z: point.z})); root.add(tube);
+    const end = route[route.length - 1];
+    const marker = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.08, 6, 40), material(HANGAR_SCENE_THEME.guideLine, true));
+    marker.name = 'GuideLineDestination'; marker.rotation.x = -Math.PI / 2; marker.position.set(end.x, 0.06, end.z); root.add(marker);
   }
 
   const selectedId = sceneSelection(sceneView);
