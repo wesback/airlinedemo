@@ -28,6 +28,7 @@ public sealed class ReleaseIdentityContractTests
             new[]
             {
                 "app_acr_pull",
+                "app_copilot_audit_key",
                 "app_evidence",
                 "app_openai_user",
                 "app_passcode_secret",
@@ -35,6 +36,7 @@ public sealed class ReleaseIdentityContractTests
                 "build_acr_push",
                 "build_runner_token_secret",
                 "gateway_cognitive_services",
+                "gateway_content_safety",
                 "migration_sql",
                 "release_acr_push",
                 "release_container_app",
