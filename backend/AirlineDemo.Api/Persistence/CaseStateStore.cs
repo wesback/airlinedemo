@@ -872,9 +872,16 @@ public sealed class CaseStateStore : ICaseStateStore
                 proposals.Consume(entry, new Copilot.CopilotReleaseReceipt(commit.Fingerprint, receipt));
                 try { Persist(snapshot); }
                 catch { proposals.Restore(entry); throw; }
-                try { commit.Ledger.AppendAsync(commit.Outcome, CancellationToken.None).GetAwaiter().GetResult(); }
+                var gateAppended = false;
+                try
+                {
+                    commit.Details.AppendAsync([commit.Gate], CancellationToken.None).GetAwaiter().GetResult();
+                    gateAppended = true;
+                    commit.Ledger.AppendAsync(commit.Outcome, CancellationToken.None).GetAwaiter().GetResult();
+                }
                 catch
                 {
+                    if (gateAppended && commit.Details is Copilot.InMemoryCopilotInvocationDetailStore details) details.Retract(commit.Gate);
                     proposals.Restore(entry);
                     Persist(previous);
                     throw new Copilot.CopilotAuditUnavailableException();

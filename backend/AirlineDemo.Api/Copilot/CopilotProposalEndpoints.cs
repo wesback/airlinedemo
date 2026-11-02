@@ -36,7 +36,7 @@ public sealed record CopilotApiResult(int Status, string Code, JsonObject Body, 
 /// </summary>
 public sealed class CopilotProposalService(
     ICopilotProposalStore proposals, ICopilotInvocationLedger ledger, CopilotProjections projections, ICaseStateStore cases, TimeProvider time,
-    DemoSessionStore sessions, ICopilotInvocationStore invocations)
+    DemoSessionStore sessions, ICopilotInvocationStore invocations, ICopilotInvocationDetailStore details, ILogger<CopilotProposalService> logger)
 {
     public const string Warning = "Simulated release: no lessee or external system is contacted.";
     private static readonly Dictionary<string, string> Decisions = new(StringComparer.Ordinal)
@@ -94,9 +94,10 @@ public sealed class CopilotProposalService(
 
     /// <summary>
     /// Releases from an approved proposal, or replays its original receipt, in one atomic store operation (FR-010,
-    /// FR-011). The ledger outcome of a fresh release is appended inside that operation.
+    /// FR-011). The ledger outcome and the passed gate row of a fresh release are appended inside that operation; every
+    /// other gate decision gets its gate row after it (FR-012).
     /// </summary>
-    public CopilotApiResult Release(CopilotAdmission admission, DemoSession? session, string caseId, long expectedRevision, string? rawNote,
+    public async Task<CopilotApiResult> ReleaseAsync(CopilotAdmission admission, DemoSession? session, string caseId, long expectedRevision, string? rawNote,
         string proposalId)
     {
         if (Presenter(session, caseId, out var scope) is { } denied) return denied;
@@ -107,12 +108,36 @@ public sealed class CopilotProposalService(
         var commit = new CopilotReleaseCommit(id, callerRef, sessionRef,
             CopilotReleasePolicy.Fingerprint(id, callerRef, sessionRef, caseId, CopilotProposal.FinalRelease, expectedRevision, note),
             expectedRevision, session.User.Id, time, () => Revalidate(session, caseId),
-            ledger.OutcomeRecord(admission, 200, "ok", CopilotOutcome.Succeeded), proposals, invocations);
-        try { return cases.CommitCopilotRelease(scope!, commit); }
+            ledger.OutcomeRecord(admission, 200, "ok", CopilotOutcome.Succeeded), proposals, invocations,
+            Gate(admission, id, "passed", null), details);
+        CopilotApiResult result;
+        try { result = cases.CommitCopilotRelease(scope!, commit); }
         catch (CopilotAuditUnavailableException) { return CopilotApiResult.Error(503, "audit_unavailable"); }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             return CopilotApiResult.Error(503, "release_unavailable");
+        }
+        if (result.Recorded) return result;
+        var blockers = result.Body["error"]?["blockers"]?.AsArray().Select(item => (string)item!).ToArray();
+        var gate = Gate(admission, id, result.Status == 200 ? "replayed" : result.Code, blockers);
+        return await RecordAsync(gate) ? result : CopilotApiResult.Error(503, "audit_unavailable");
+    }
+
+    private CopilotInvocationDetail Gate(CopilotAdmission admission, Guid proposalId, string result, IReadOnlyList<string>? blockers) =>
+        new(admission.InvocationId, "release_gate", time.GetUtcNow(), ProposalId: proposalId, Gate: CopilotInvocationDetails.FinalReleaseGate,
+            GateResult: result, BlockerCodes: blockers);
+
+    /// <summary>Appends one proposal detail row for an admitted invocation; false when the details store refused it.</summary>
+    public async Task<bool> RecordAsync(CopilotAdmission admission, string kind, string proposalId) =>
+        Guid.TryParseExact(proposalId, "D", out var id) && await RecordAsync(new CopilotInvocationDetail(admission.InvocationId, kind, time.GetUtcNow(), ProposalId: id));
+
+    private async Task<bool> RecordAsync(CopilotInvocationDetail detail)
+    {
+        try { await details.AppendAsync([detail], CancellationToken.None); return true; }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogError("Copilot {Kind} detail could not be recorded.", detail.Kind);
+            return false;
         }
     }
 
@@ -216,8 +241,13 @@ public static class CopilotProposalEndpoints
         var decision = body is { Count: 1 } && body.TryGetValue("decision", out var value) && value.ValueKind == JsonValueKind.String
             && CopilotProposalService.IsDecision(value.GetString()) ? value.GetString() : null;
         return await CopilotInvocation.RunAsync(ledger, cases, session, decision ?? "decision", CopilotProvenance.TrustedUi, caseId,
-            _ => Task.FromResult((decision is null ? CopilotApiResult.Error(400, "invalid_request")
-                : service.Decide(session, caseId, proposalId, decision)).ToInvocation()), http.RequestAborted);
+            async (admission, _) =>
+            {
+                var result = decision is null ? CopilotApiResult.Error(400, "invalid_request") : service.Decide(session, caseId, proposalId, decision);
+                if (result.Status == 200 && !await service.RecordAsync(admission, "proposal_decided", proposalId))
+                    result = CopilotApiResult.Error(503, "audit_unavailable");
+                return result.ToInvocation();
+            }, http.RequestAborted);
     }
 
     /// <summary>The request's JSON object properties, or null for malformed JSON, a non-object or a duplicate property.</summary>

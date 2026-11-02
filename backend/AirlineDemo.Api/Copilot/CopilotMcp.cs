@@ -187,7 +187,7 @@ public static class CopilotMcp
         return name switch
         {
             "list_my_cases" => Task.FromResult(ListMyCases(projections, session, http)),
-            "advance_stage" => Task.FromResult(AdvanceStage(args, session, http, admission)),
+            "advance_stage" => AdvanceStage(args, session, http, admission),
             "get_case_summary" => Task.FromResult(FromHttp(CopilotProjectionEndpoints.ToResult(projections.Summary(session, args.CaseId!)), http)),
             "get_open_points" => Task.FromResult(FromHttp(CopilotProjectionEndpoints.ToResult(projections.OpenPoints(session, args.CaseId!)), http)),
             _ => ReadSource(args, http, admission, cancellationToken),
@@ -196,7 +196,7 @@ public static class CopilotMcp
 
     // The note comes only from the private request context; without a proposal id a pending proposal is created and its
     // confirmation tuple is returned under uiOnly, which only the trusted UI may show (it never reaches the model).
-    private static CopilotInvocationResult AdvanceStage(ToolArgs args, DemoSession session, HttpContext http, CopilotAdmission admission)
+    private static async Task<CopilotInvocationResult> AdvanceStage(ToolArgs args, DemoSession session, HttpContext http, CopilotAdmission admission)
     {
         var service = http.RequestServices.GetRequiredService<CopilotProposalService>();
         var note = http.Items[ReleaseNoteKey] as string;
@@ -204,12 +204,13 @@ public static class CopilotMcp
         {
             var created = service.Create(session, args.CaseId!, args.ExpectedRevision!.Value, note);
             if (created.Status != StatusCodes.Status200OK) return FromApi(created);
+            if (!await service.RecordAsync(admission, "proposal_created", (string)created.Body["proposalId"]!)) return Fail(503, "audit_unavailable");
             return new(new ToolResult(new JsonObject
             {
                 ["contractVersion"] = CopilotProjections.ContractVersion, ["httpStatus"] = 200, ["resultCode"] = created.Code, ["uiOnly"] = created.Body,
             }, false), StatusCodes.Status200OK, created.Code, CopilotOutcome.Succeeded);
         }
-        return FromApi(service.Release(admission, session, args.CaseId!, args.ExpectedRevision!.Value, note, args.ProposalId));
+        return FromApi(await service.ReleaseAsync(admission, session, args.CaseId!, args.ExpectedRevision!.Value, note, args.ProposalId));
     }
 
     private static CopilotInvocationResult FromApi(CopilotApiResult api)

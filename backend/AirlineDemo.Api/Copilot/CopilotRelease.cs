@@ -12,12 +12,13 @@ public sealed record CopilotReleaseReceipt(string Fingerprint, string Bytes);
 
 /// <summary>
 /// Everything one atomic copilot release needs inside the store's commit boundary: the requested command, the
-/// revalidation of the live session, the clock, the prepared ledger outcome row and the stores that hold the proposal
-/// lifecycle and the ledger.
+/// revalidation of the live session, the clock, the prepared ledger outcome row, the passed release gate detail row and
+/// the stores that hold the proposal lifecycle, the ledger and the details.
 /// </summary>
 public sealed record CopilotReleaseCommit(
     Guid ProposalId, string CallerRef, string SessionRef, string Fingerprint, long ExpectedRevision, string Actor, TimeProvider Time,
-    Func<CopilotApiResult?> Revalidate, CopilotInvocationRecord Outcome, ICopilotProposalStore Proposals, ICopilotInvocationStore Ledger);
+    Func<CopilotApiResult?> Revalidate, CopilotInvocationRecord Outcome, ICopilotProposalStore Proposals, ICopilotInvocationStore Ledger,
+    CopilotInvocationDetail Gate, ICopilotInvocationDetailStore Details);
 
 public static class CopilotReleasePolicy
 {
