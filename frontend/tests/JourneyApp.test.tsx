@@ -32,6 +32,7 @@ function stubApi(overrides: Record<string, (init?: RequestInit) => Response> = {
     'GET /api/cases/cp-case-c/reserve': () => new Response(null, { status: 403 }),
     'GET /api/cases/cp-case-c/obligations': () => new Response(null, { status: 403 }),
     'GET /api/cases/cp-case-c/readiness': () => json({ sentence: 'Return in 9 months.' }),
+    'GET /api/v1/cases/cp-case-c/copilot/activity': () => json({ contractVersion: 1, caseId: 'cp-case-c', items: [] }),
     ...overrides,
   };
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -51,6 +52,83 @@ async function signInAs(name: string) {
 
 beforeEach(() => { window.history.replaceState({}, '', '/'); window.localStorage.clear(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+const copilotItem = (invocationId: string, operation: string, minute: number, extra: object = {}) => ({
+  invocationId, operation, at: `2026-10-30T10:0${minute}:00Z`, outcome: 'succeeded', httpStatus: 200, resultCode: 'ok', source: 'from copilot',
+  user: 'Technical reviewer', role: 'technical-reviewer', provenance: 'copilot-client', records: [], screening: null, proposalId: null, gate: null, ...extra,
+});
+const copilotItems = [
+  copilotItem('i-read', 'read_source', 5, { records: [{ sourceId: 'maintenance', recordId: 'mx-cp-a-task-card-001', recordVersion: 1 }],
+    screening: { state: 'detected', flaggedFields: ['taskText'] } }),
+  copilotItem('i-gate', 'advance_stage', 6, { outcome: 'failed', httpStatus: 409, resultCode: 'release_blocked', user: null, role: 'presenter',
+    proposalId: 'p-1', gate: { name: 'final-release', result: 'release_blocked', blockers: ['reserve_not_approved', 'obligations_not_signed_off'] } }),
+];
+const trailTexts = (trail: HTMLElement) => within(trail).getAllByRole('listitem').map((item) => item.querySelector('p')?.textContent);
+
+describe('activity trail', () => {
+  it('filters the activity trail to Copilot and UI entries', async () => {
+    stubApi({ 'GET /api/v1/cases/cp-case-c/copilot/activity': () => json({ contractVersion: 1, caseId: 'cp-case-c', items: copilotItems }) });
+    window.history.replaceState({}, '', '/cases/cp-case-c');
+    render(<App />);
+    await signInAs('Riley Reviewer');
+    const trail = await screen.findByRole('complementary', { name: 'Activity' });
+    await waitFor(() => expect(within(trail).getAllByRole('listitem')).toHaveLength(5));
+    const ui = trailTexts(trail).slice(2);
+    expect(trailTexts(trail).slice(0, 2)).toEqual(['Copilot advance_stage: failed', 'Copilot read_source: succeeded']);
+    expect(ui).toHaveLength(3);
+
+    fireEvent.click(within(trail).getByRole('radio', { name: 'Copilot' }));
+    expect(trailTexts(trail)).toEqual(['Copilot advance_stage: failed', 'Copilot read_source: succeeded']);
+    expect([...trail.querySelectorAll('.av-activity-badge')].map((badge) => badge.textContent)).toEqual(['Copilot', 'Copilot']);
+    fireEvent.click(within(trail).getByRole('radio', { name: 'UI' }));
+    expect(trailTexts(trail)).toEqual(ui);
+    expect(trail.querySelectorAll('.av-activity-badge')).toHaveLength(0);
+    fireEvent.click(within(trail).getByRole('radio', { name: 'All' }));
+    expect(within(trail).getAllByRole('listitem')).toHaveLength(5);
+    expect(within(trail).getAllByRole('button').every((button) => button.textContent!.startsWith('Details for '))).toBe(true);
+    expect(within(trail).queryByRole('textbox')).toBeNull();
+  });
+
+  it('opens a copilot entry with who, role, tool, records, screening and the gate blockers', async () => {
+    stubApi({ 'GET /api/v1/cases/cp-case-c/copilot/activity': () => json({ contractVersion: 1, caseId: 'cp-case-c', items: copilotItems }) });
+    window.history.replaceState({}, '', '/cases/cp-case-c');
+    render(<App />);
+    await signInAs('Riley Reviewer');
+    const trail = await screen.findByRole('complementary', { name: 'Activity' });
+    const details = (button: HTMLElement) => {
+      fireEvent.click(button);
+      expect(button.getAttribute('aria-expanded')).toBe('true');
+      const list = document.getElementById(button.getAttribute('aria-controls')!)!;
+      return [...list.querySelectorAll('dd')].map((value) => `${value.previousElementSibling!.textContent}=${value.textContent}`);
+    };
+    const [gate, read] = await waitFor(() => { const found = within(trail).getAllByRole('button', { name: /^Details for / }); expect(found).toHaveLength(2); return found; });
+    expect(details(gate)).toEqual(['Who=unknown user', 'Role=presenter', 'Tool=advance_stage', 'Outcome=failed (409 release_blocked)', 'Records=None',
+      'Screening=None', 'Proposal=p-1', 'Gate=final-release: release_blocked; blockers: reserve_not_approved, obligations_not_signed_off']);
+    expect(details(read)).toEqual(['Who=Technical reviewer', 'Role=technical-reviewer', 'Tool=read_source', 'Outcome=succeeded (200 ok)',
+      'Records=maintenance mx-cp-a-task-card-001 v1', 'Screening=detected: taskText', 'Proposal=None', 'Gate=None']);
+    expect(gate.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('keeps the UI entries with a notice when copilot activity is unavailable', async () => {
+    stubApi({ 'GET /api/v1/cases/cp-case-c/copilot/activity': () => json({ contractVersion: 1, error: { code: 'audit_unavailable' } }, 503) });
+    window.history.replaceState({}, '', '/cases/cp-case-c');
+    render(<App />);
+    await signInAs('Riley Reviewer');
+    const trail = await screen.findByRole('complementary', { name: 'Activity' });
+    expect((await within(trail).findByRole('status')).textContent).toBe('Copilot activity is unavailable right now. Showing activity recorded in the app only.');
+    expect(within(trail).getAllByRole('listitem')).toHaveLength(3);
+  });
+
+  it('shows no notice when the case is outside the copilot scope', async () => {
+    stubApi({ 'GET /api/v1/cases/cp-case-c/copilot/activity': () => new Response(null, { status: 404 }) });
+    window.history.replaceState({}, '', '/cases/cp-case-c');
+    render(<App />);
+    await signInAs('Riley Reviewer');
+    const trail = await screen.findByRole('complementary', { name: 'Activity' });
+    await waitFor(() => expect(within(trail).getAllByRole('listitem')).toHaveLength(3));
+    expect(within(trail).queryByRole('status')).toBeNull();
+  });
+});
 
 describe('journey app', () => {
   it('opens the read-only compliance view from the case decision dossier', async () => {

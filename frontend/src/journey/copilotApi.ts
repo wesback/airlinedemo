@@ -14,6 +14,13 @@ export type CopilotAnswer = {
 export type CopilotReceipt = {
   contractVersion: number; proposalId: string; caseId: string; decision: string; revision: number; auditSequence: number; simulated: boolean;
 };
+export type CopilotActivityItem = {
+  invocationId: string; operation: string; at: string; outcome: string; httpStatus: number; resultCode: string; source: 'from copilot';
+  user: string | null; role: string; provenance: string; records: CopilotCitation[];
+  screening: { state: string; flaggedFields: string[] } | null; proposalId: string | null;
+  gate: { name: string; result: string; blockers: string[] } | null;
+};
+export type CopilotActivity = { contractVersion: number; caseId: string; items: CopilotActivityItem[] };
 export type CopilotQuestionBody = { question: string; selectedCaseId?: string; releaseNote?: string };
 export type CopilotOutcome<T> = { ok: true; value: T } | { ok: false; status: number; code: string; blockers: string[] };
 
@@ -38,6 +45,22 @@ export async function postCopilot<T>(url: string, csrfToken: string, body: unkno
   const code = typeof error?.code === 'string' ? error.code : response.ok ? 'invalid_response' : `http_${response.status}`;
   const blockers = Array.isArray(error?.blockers) ? error.blockers.filter((item): item is string => typeof item === 'string') : [];
   return { ok: false, status: response.status, code, blockers };
+}
+
+/**
+ * Reads the copilot activity of a case. A 403 or 404 means the case or role is outside the copilot scope, so there is
+ * no copilot activity to show; any other failure is reported as unavailable.
+ */
+export async function getCopilotActivity(caseId: string): Promise<CopilotActivityItem[] | 'unavailable'> {
+  try {
+    const response = await fetch(copilotCaseUrl(caseId, '/activity'));
+    if (response.status === 403 || response.status === 404) return [];
+    if (!response.ok) return 'unavailable';
+    const body = await response.json() as Partial<CopilotActivity>;
+    return Array.isArray(body.items) ? body.items : 'unavailable';
+  } catch {
+    return 'unavailable';
+  }
 }
 
 const messages: Record<string, string> = {

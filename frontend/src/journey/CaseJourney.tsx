@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { caseUrl, getJson, type CaseHistory, type CaseRecord, type ObligationRecord, type Readiness, type ReserveDraft, type Session, type TechnicalReviews } from './api';
-import { activityFrom, aircraftFor, deriveProgress, formatWhen, STEPS, waitingOn, type StepId } from './model';
+import { activityFrom, aircraftFor, deriveProgress, STEPS, waitingOn, type StepId } from './model';
+import ActivityTrail from './ActivityTrail';
+import { getCopilotActivity, type CopilotActivityItem } from './copilotApi';
 import { ActorGlyph, ActorTag, AircraftArt, CheckIcon } from './Art';
 import { StepPanel, type JourneyData } from './StepPanels';
 import { aiBriefFor } from './aiBriefs';
@@ -23,18 +25,21 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
   const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState<StepId | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [copilotTrail, setCopilotTrail] = useState<CopilotActivityItem[] | 'unavailable' | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   const load = useCallback(async () => {
     try {
       const record = await getJson<CaseRecord>(caseUrl(caseId));
-      const [history, reviews, reserve, obligations, readiness] = await Promise.all([
+      const [history, reviews, reserve, obligations, readiness, copilot] = await Promise.all([
         optional<CaseHistory>(caseUrl(caseId, '/history')),
         optional<TechnicalReviews>(caseUrl(caseId, '/technical-reviews')),
         optional<ReserveDraft>(caseUrl(caseId, '/reserve')),
         optional<ObligationRecord>(caseUrl(caseId, '/obligations')),
         optional<Readiness>(caseUrl(caseId, '/readiness')),
+        getCopilotActivity(caseId),
       ]);
+      setCopilotTrail(copilot);
       setData({ record, progress: deriveProgress(record), history, reviews, reserve, obligations, readiness });
       setFailed(false);
     } catch {
@@ -42,7 +47,7 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
     }
   }, [caseId]);
 
-  useEffect(() => { setData(null); setSelected(null); setEvidenceOpen(false); void load(); }, [load, session.id]);
+  useEffect(() => { setData(null); setCopilotTrail(null); setSelected(null); setEvidenceOpen(false); void load(); }, [load, session.id]);
   useEffect(() => { headingRef.current?.focus(); }, [caseId]);
 
   const refresh = useCallback(async () => { await load(); onChanged(); }, [load, onChanged]);
@@ -151,23 +156,7 @@ export default function CaseJourney({ session, caseId, onBack, onSwitchPersona, 
               ? <AiInsightCard brief={brief} onOpen={() => setSelected('investigation')} />
               : null;
           })()}
-          <aside className="av-activity" aria-labelledby="activity-heading">
-            <h2 id="activity-heading">Activity</h2>
-            {activityFrom(data.record.audit).length === 0 ? <p className="av-muted">No activity yet. The aircraft has just arrived.</p> : (
-              <ol>
-                {activityFrom(data.record.audit).map((item) => (
-                  <li key={item.key} id={`case-activity-${item.key}`} tabIndex={-1} className={`av-activity-${item.actor}`}>
-                    <span className="av-activity-dot"><ActorGlyph actor={item.actor} size={12} /></span>
-                    <div>
-                      <p>{item.what}</p>
-                      {item.reason && <p className="av-activity-reason">{item.reason}</p>}
-                      <p className="av-activity-meta">{item.who}, {formatWhen(item.at)}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </aside>
+          <ActivityTrail business={activityFrom(data.record.audit)} copilot={copilotTrail} />
           </div>
         </div>
       )}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { activityFrom, actorKind, deriveProgress, waitingOn } from '../src/journey/model';
+import { activityFrom, actorKind, deriveProgress, mergeTrail, waitingOn, type ActivityItem } from '../src/journey/model';
+import type { CopilotActivityItem } from '../src/journey/copilotApi';
 import type { AuditEvent, CaseHistory, CaseRecord } from '../src/journey/api';
 import { aiBriefFor, aiChipFor } from '../src/journey/aiBriefs';
 
@@ -84,6 +85,18 @@ describe('activity', () => {
     expect(items).toHaveLength(4);
     expect(items[0]).toMatchObject({ actor: 'human', who: 'Technical reviewer', what: 'Technical review accepted the findings', reason: 'Verified.' });
     expect(items[3]).toMatchObject({ actor: 'rules', who: 'Intake service' });
+  });
+});
+
+describe('merged trail', () => {
+  const ui = (key: string, at: string): ActivityItem => ({ key, actor: 'human', who: 'Technical reviewer', what: key, reason: null, at });
+  const copilot = (invocationId: string, at: string) => ({ invocationId, at, source: 'from copilot' }) as CopilotActivityItem;
+
+  it('orders UI and copilot entries newest first and keeps UI entries first on equal times', () => {
+    const merged = mergeTrail([ui('3', '2026-10-30T10:02:00Z'), ui('1', '2026-10-30T10:00:00Z')],
+      [copilot('a', '2026-10-30T10:01:00Z'), copilot('b', '2026-10-30T10:02:00Z'), copilot('c', '2026-10-30T10:03:00Z')]);
+    expect(merged.map((entry) => `${entry.origin}:${entry.key}`)).toEqual(['copilot:copilot-c', 'ui:ui-3', 'copilot:copilot-b', 'copilot:copilot-a', 'ui:ui-1']);
+    expect(mergeTrail([], [])).toEqual([]);
   });
 });
 
