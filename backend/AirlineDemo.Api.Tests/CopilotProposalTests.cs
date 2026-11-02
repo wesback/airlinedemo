@@ -344,6 +344,8 @@ public sealed class CopilotProposalTests : IAsyncDisposable
             services.AddSingleton<ICopilotInvocationStore>(new SqlCopilotInvocationStore(options));
             services.RemoveAll<ICopilotProposalStore>();
             services.AddSingleton<ICopilotProposalStore>(new SqlCopilotProposalStore(options));
+            services.RemoveAll<ICopilotInvocationDetailStore>();
+            services.AddSingleton<ICopilotInvocationDetailStore>(new SqlCopilotInvocationDetailStore(options));
         });
         return options;
     }
@@ -383,7 +385,7 @@ public sealed class CopilotProposalTests : IAsyncDisposable
         var services = _factory.Services;
         var result = await CopilotInvocation.RunAsync(services.GetRequiredService<ICopilotInvocationLedger>(),
             services.GetRequiredService<ICaseStateStore>(), session, "advance_stage", CopilotProvenance.TrustedUi, caseId,
-            (admission, _) => Task.FromResult(Service.Release(admission, session, caseId, revision, note, proposalId).ToInvocation()),
+            async (admission, _) => (await Service.ReleaseAsync(admission, session, caseId, revision, note, proposalId)).ToInvocation(),
             CancellationToken.None);
         var http = new DefaultHttpContext { RequestServices = services };
         using var stream = new MemoryStream();
@@ -405,6 +407,28 @@ public sealed class CopilotProposalTests : IAsyncDisposable
     private async Task<CopilotInvocationRecord[]> ReleaseOutcomes(string caseId = CaseA) =>
         [.. (await _factory.Services.GetRequiredService<ICopilotInvocationStore>().ReadCaseAsync(caseId, CancellationToken.None))
             .Where(item => item is { Phase: "outcome", Operation: "advance_stage" })];
+
+    private Task<IReadOnlyList<CopilotInvocationDetail>> Details(string caseId = CaseA) =>
+        _factory.Services.GetRequiredService<ICopilotInvocationDetailStore>().ListForCaseAsync(caseId, CancellationToken.None);
+
+    // Each detail row with the ledger operation of its invocation; the frozen clock keeps rows in append order.
+    private async Task<(string, string, string?, string?, string?, string)[]> GateTrail()
+    {
+        var operations = (await _factory.Services.GetRequiredService<ICopilotInvocationStore>().ReadCaseAsync(CaseA, CancellationToken.None))
+            .GroupBy(item => item.InvocationId).ToDictionary(group => group.Key, group => group.First().Operation);
+        return [.. (await Details()).Select(item => (operations[item.InvocationId], item.Kind, item.ProposalId?.ToString("D"), item.Gate,
+            item.GateResult, string.Join(",", item.BlockerCodes ?? [])))];
+    }
+
+    private sealed class ToggleDetails(ICopilotInvocationStore ledger) : ICopilotInvocationDetailStore
+    {
+        public readonly InMemoryCopilotInvocationDetailStore Inner = new(ledger);
+        public volatile string? FailKind;
+        public Task AppendAsync(IReadOnlyList<CopilotInvocationDetail> details, CancellationToken cancellationToken) =>
+            details.Any(item => item.Kind == FailKind) ? throw new InvalidOperationException("details offline") : Inner.AppendAsync(details, cancellationToken);
+        public Task<IReadOnlyList<CopilotInvocationDetail>> ListForCaseAsync(string caseRef, CancellationToken cancellationToken) =>
+            Inner.ListForCaseAsync(caseRef, cancellationToken);
+    }
 
     private CopilotProposalEntry Entry(string proposalId) =>
         _factory.Services.GetRequiredService<ICopilotProposalStore>().Find(Guid.Parse(proposalId))!;
@@ -609,6 +633,7 @@ public sealed class CopilotProposalTests : IAsyncDisposable
             Assert.Equal(before.Audit, State().Audit);
             Assert.Equal((CopilotProposalStates.Approved, (CopilotReleaseReceipt?)null), (Entry(proposalId).State, Entry(proposalId).Receipt));
             Assert.DoesNotContain(await ReleaseOutcomes(), item => item.ResultCode == "ok");
+            Assert.DoesNotContain(await Details(), item => item.GateResult == "passed");
         }
 
         await Fails(() => failPersist = true, () => failPersist = false, 503, "release_unavailable");
@@ -759,5 +784,93 @@ public sealed class CopilotProposalTests : IAsyncDisposable
         // frozen, so rows share a timestamp and are compared without order.
         Assert.Equal(["confirmation_required", "confirmation_required", "forbidden", "invalid_release_note", "invalid_release_note", "ok", "ok"],
             outcomes.Select(item => item.ResultCode).Order(StringComparer.Ordinal));
+    }
+
+    // AC-052: every gate decision is one release_gate row with the exact result and blockers in API order; the proposal
+    // lifecycle rows link the same proposal.
+    [Fact]
+    public async Task Release_GateDetailRows_ExactResultAndBlockers()
+    {
+        foreach (var sql in new[] { false, true })
+        {
+            if (sql) UseSql();
+            Unblock();
+            Gate(CaseA, FinanceEndpoints.ReserveDecisionAction, "return");
+            Gate(CaseA, FinanceEndpoints.LegalDecisionAction, "rejected");
+            var presenter = Session("presenter", CpCases);
+            var revision = Revision(CaseA);
+            async Task<string> Propose() =>
+                (string)(await PostAdvance(presenter, $$"""{"expectedRevision":{{Revision(CaseA)}},"releaseNote":"{{Note}}"}""")).Json["uiOnly"]!["proposalId"]!;
+            string Retry(string id, long at) => $$"""{"expectedRevision":{{at}},"releaseNote":"{{Note}}","proposalId":"{{id}}"}""";
+
+            var blocked = await Propose();
+            Assert.Equal(HttpStatusCode.OK, (await Decision(presenter, blocked, "approve")).Status);
+            Assert.Equal(HttpStatusCode.Conflict, (await PostAdvance(presenter, Retry(blocked, revision))).Status);
+            Unblock();
+            var fresh = await Propose();
+            Assert.Equal(HttpStatusCode.OK, (await Decision(presenter, fresh, "approve")).Status);
+            Assert.Equal(HttpStatusCode.OK, (await PostAdvance(presenter, Retry(fresh, revision + 2))).Status);
+            Assert.Equal(HttpStatusCode.OK, (await PostAdvance(presenter, Retry(fresh, revision + 2))).Status);
+
+            const string gate = CopilotInvocationDetails.FinalReleaseGate;
+            Assert.Equal([
+                ("advance_stage", "proposal_created", blocked, null, null, ""),
+                ("approve", "proposal_decided", blocked, null, null, ""),
+                ("advance_stage", "release_gate", blocked, gate, "release_blocked", "reserve_not_approved,obligations_not_signed_off"),
+                ("advance_stage", "proposal_created", fresh, null, null, ""),
+                ("approve", "proposal_decided", fresh, null, null, ""),
+                ("advance_stage", "release_gate", fresh, gate, "passed", ""),
+                ("advance_stage", "release_gate", fresh, gate, "replayed", ""),
+            ], await GateTrail());
+        }
+    }
+
+    // AC-052: a gate row that cannot be stored leaves no committed release: revision, audit, proposal, receipt and
+    // ledger are unchanged, and the same approval releases once the store recovers.
+    [Fact]
+    public async Task Release_DetailAppendFails_RollsBack()
+    {
+        foreach (var sql in new[] { false, true })
+        {
+            ToggleDetails? toggle = null;
+            DbContextOptions<CaseStateDbContext>? options = null;
+            if (sql) options = UseSql();
+            else Use((services, _) =>
+            {
+                services.RemoveAll<ICopilotInvocationDetailStore>();
+                services.AddSingleton<ICopilotInvocationDetailStore>(provider => toggle = new(provider.GetRequiredService<ICopilotInvocationStore>()));
+            });
+            Unblock();
+            var presenter = Session("presenter", CpCases);
+            var before = State();
+            var proposalId = Approved(presenter);
+            var ledgerBefore = (await _factory.Services.GetRequiredService<ICopilotInvocationStore>().ReadCaseAsync(CaseA, CancellationToken.None)).Count;
+
+            if (sql) Sql(options!, "CREATE TRIGGER fault BEFORE INSERT ON copilot_invocation_details WHEN NEW.GateResult = 'passed' BEGIN SELECT RAISE(ABORT, 'fault'); END;");
+            else { _ = await Details(); toggle!.FailKind = "release_gate"; }
+            Assert.Equal((503, Error("audit_unavailable")), await Advance(presenter, proposalId, before.Revision));
+            Assert.Equal((before.Revision, before.Audit.Count), (State().Revision, State().Audit.Count));
+            Assert.Equal((CopilotProposalStates.Approved, (CopilotReleaseReceipt?)null), (Entry(proposalId).State, Entry(proposalId).Receipt));
+            var ledgerAfter = await _factory.Services.GetRequiredService<ICopilotInvocationStore>().ReadCaseAsync(CaseA, CancellationToken.None);
+            Assert.DoesNotContain(ledgerAfter, item => item.ResultCode == "ok" && item.Operation == "advance_stage");
+            Assert.Equal(ledgerBefore + 2, ledgerAfter.Count);
+            Assert.Empty(await Details());
+
+            if (sql) Sql(options!, "DROP TRIGGER fault;");
+            else
+            {
+                // A proposal row or a refused gate row that cannot be stored is also audit_unavailable.
+                toggle!.FailKind = "proposal_created";
+                Assert.Equal((HttpStatusCode.ServiceUnavailable, ToolError(503, "audit_unavailable")),
+                    Status(await PostAdvance(presenter, $$"""{"expectedRevision":{{before.Revision}},"releaseNote":"{{Note}}"}""")));
+                toggle.FailKind = "proposal_decided";
+                Assert.Equal((HttpStatusCode.ServiceUnavailable, Error("audit_unavailable")), Status(await Decision(presenter, Create(presenter), "approve")));
+                toggle.FailKind = "release_gate";
+                Assert.Equal((503, Error("audit_unavailable")), await Advance(presenter, Create(presenter), before.Revision));
+                toggle.FailKind = null;
+            }
+            Assert.Equal((200, Receipt(proposalId, before.Revision + 1, before.Audit.Count + 1)), await Advance(presenter, proposalId, before.Revision));
+            Assert.Equal((before.Revision + 1, 1), (Revision(CaseA), Releases(CaseA)));
+        }
     }
 }

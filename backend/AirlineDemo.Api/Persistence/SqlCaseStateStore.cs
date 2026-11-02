@@ -339,6 +339,7 @@ public sealed class SqlCaseStateStore : ICaseStateStore
         });
         db.SaveChanges();
         db.CopilotInvocations.Add(Copilot.SqlCopilotInvocationStore.ToRow(commit.Outcome));
+        db.CopilotInvocationDetails.Add(Copilot.SqlCopilotInvocationDetailStore.ToRow(commit.Gate));
         try { db.SaveChanges(); }
         catch (Exception exception) when (exception is DbUpdateException or InvalidOperationException)
         {

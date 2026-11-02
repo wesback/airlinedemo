@@ -84,6 +84,9 @@ public sealed class InMemoryCopilotInvocationDetailStore(ICopilotInvocationStore
         return Task.CompletedTask;
     }
 
+    // Rollback hook for the file-backed release commit only; no route or interface member can remove a row.
+    internal void Retract(CopilotInvocationDetail detail) { lock (_gate) _details.Remove(detail); }
+
     public async Task<IReadOnlyList<CopilotInvocationDetail>> ListForCaseAsync(string authorizedCaseRef, CancellationToken cancellationToken)
     {
         var ids = (await invocations.ReadCaseAsync(authorizedCaseRef, cancellationToken)).Select(record => record.InvocationId).ToHashSet();
