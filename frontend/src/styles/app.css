@@ -579,6 +579,27 @@ button:disabled { cursor: not-allowed; }
 .av-activity .av-activity-reason { font-weight: 500; color: var(--av-text-2); font-style: italic; }
 .av-activity .av-activity-meta { font-size: 12px; font-weight: 500; color: var(--av-text-3); }
 
+.av-copilot-dock { width: min(1440px, 100%); margin: 0 auto; padding: 0 32px 48px; }
+.av-copilot { background: var(--av-surface); border: 1px solid var(--av-line); border-radius: var(--av-radius-l); padding: 20px; display: grid; gap: 12px; }
+.av-copilot h2 { font-size: 16px; font-weight: 700; }
+.av-copilot h3 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.av-copilot .av-notice { margin-top: 0; }
+.av-copilot-notice { background: var(--av-human-soft); color: var(--av-text); }
+.av-copilot-form { display: grid; gap: 12px; }
+.av-copilot-form > .av-button { justify-self: start; }
+.av-copilot-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.av-copilot-citations { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.av-copilot-records { border-top: 1px solid var(--av-line); padding-top: 12px; display: grid; gap: 10px; }
+.av-copilot-record { border: 1px solid var(--av-line); border-radius: var(--av-radius-s); padding: 10px 12px; background: var(--av-surface-2); }
+.av-copilot-record.is-selected { border-color: var(--av-ai); }
+.av-copilot-record-meta { font-size: 12px; font-weight: 600; color: var(--av-text-2); }
+.av-copilot-record pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; max-height: 240px; overflow: auto; }
+.av-copilot-confirmation { margin-top: 12px; border: 1px solid var(--av-line-strong); border-radius: var(--av-radius); padding: 14px; display: grid; gap: 10px; }
+.av-copilot-tuple { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 13.5px; }
+.av-copilot-tuple dt { font-weight: 700; color: var(--av-text-2); }
+.av-copilot-tuple dd { margin: 0; }
+.av-copilot-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
 /* ---------- Dark adjustments ---------- */
 :root[data-theme='dark'] .av-logo:not(.av-logo-inverse) { color: var(--av-text); }
 :root[data-theme='dark'] .av-aircraft-body { fill: #e9ecf3; }

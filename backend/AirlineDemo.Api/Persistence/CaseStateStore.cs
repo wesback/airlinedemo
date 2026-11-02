@@ -455,6 +455,9 @@ public sealed class CaseStateStore : ICaseStateStore
     private readonly object _gate = new();
     private Dictionary<string, CaseState> _cases;
 
+    /// <summary>The commit lock; in-memory copilot proposals share it so lifecycle and release are serialized together.</summary>
+    internal object SyncRoot => _gate;
+
     public CaseStateStore(string path, Action? beforePersist = null)
     {
         _path = path;
@@ -841,6 +844,44 @@ public sealed class CaseStateStore : ICaseStateStore
             Persist(snapshot);
             _cases = snapshot;
             return new CommitResult(updated, Replayed: false);
+        }
+    }
+
+    public Copilot.CopilotApiResult CommitCopilotRelease(CaseScope scope, Copilot.CopilotReleaseCommit commit)
+    {
+        var proposals = commit.Proposals as Copilot.InMemoryCopilotProposalStore
+            ?? throw new NotSupportedException("The file-backed store releases only with in-memory proposals.");
+        lock (_gate)
+        {
+            using var fileLock = AcquireFileLock();
+            _cases = Load(_path);
+            var current = Current(scope);
+            lock (proposals.SyncRoot)
+            {
+                var entry = proposals.Find(commit.ProposalId);
+                if (Copilot.CopilotReleasePolicy.Evaluate(commit, entry, current) is { } rejected) return rejected;
+
+                var revision = current.Revision + 1;
+                var audit = current.Audit.ToList();
+                audit.Add(new AuditEvent(audit.Count + 1, revision, commit.Actor, Decisions.ReleaseEndpoints.ReleaseAction,
+                    Copilot.CopilotReleasePolicy.AuditDetail(entry!.Proposal.Note), commit.Time.GetUtcNow()));
+                var receipt = Copilot.CopilotReleasePolicy.Receipt(entry.Proposal, revision, audit.Count);
+                var previous = _cases;
+                var snapshot = new Dictionary<string, CaseState>(_cases) { [scope.CaseId] = Freeze(current with { Revision = revision, Audit = audit }) };
+
+                proposals.Consume(entry, new Copilot.CopilotReleaseReceipt(commit.Fingerprint, receipt));
+                try { Persist(snapshot); }
+                catch { proposals.Restore(entry); throw; }
+                try { commit.Ledger.AppendAsync(commit.Outcome, CancellationToken.None).GetAwaiter().GetResult(); }
+                catch
+                {
+                    proposals.Restore(entry);
+                    Persist(previous);
+                    throw new Copilot.CopilotAuditUnavailableException();
+                }
+                _cases = snapshot;
+                return Copilot.CopilotReleasePolicy.Released(receipt);
+            }
         }
     }
 

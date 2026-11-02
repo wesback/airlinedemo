@@ -32,7 +32,7 @@ public static class SourceReadEndpoints
         DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time,
         ILogger<SourceReadBudget> logger, IHostEnvironment environment) =>
         Read(version, caseId, sourceId, recordId, http, sessions, cases, modes, budget, time, logger, environment);
-    private static async Task<IResult> Read(int version, string caseId, string sourceId, string? recordId, HttpContext http,
+    internal static async Task<IResult> Read(int version, string caseId, string sourceId, string? recordId, HttpContext http,
         DemoSessionStore sessions, ICaseStateStore cases, SourceModeStore modes, SourceReadBudget budget, TimeProvider time,
         ILogger<SourceReadBudget> logger, IHostEnvironment environment)
     {

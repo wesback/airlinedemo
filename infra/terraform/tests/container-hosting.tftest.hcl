@@ -223,6 +223,24 @@ run "app_seeds_demo_cases" {
   }
 }
 
+run "app_allows_only_its_own_origin_for_the_copilot" {
+  command = plan
+
+  override_resource {
+    target          = azurerm_container_app_environment.demo
+    override_during = plan
+    values = {
+      id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test/providers/Microsoft.App/managedEnvironments/cae-test"
+      default_domain = "test-env.westeurope.azurecontainerapps.io"
+    }
+  }
+
+  assert {
+    condition     = [for e in azurerm_container_app.app[0].template[0].container[0].env : e.value if e.name == "Copilot__AllowedOrigins"] == ["https://${azurerm_container_app.app[0].name}.test-env.westeurope.azurecontainerapps.io"]
+    error_message = "The app must allow exactly its own HTTPS origin for the copilot MCP and Q&A routes."
+  }
+}
+
 run "app_uses_durable_sql_case_state" {
   command = plan
 
