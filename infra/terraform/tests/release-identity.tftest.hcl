@@ -362,6 +362,16 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
+    condition     = azurerm_role_assignment.release_environment.scope == azurerm_container_app_environment.demo.id && azurerm_role_assignment.release_environment.role_definition_name == "Container Apps Operator" && azurerm_role_assignment.release_environment.principal_id == azurerm_user_assigned_identity.release.principal_id
+    error_message = "Release may operate only the application environment, without a resource-group-wide grant."
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.release_app_identity.scope == azurerm_user_assigned_identity.app.id && azurerm_role_assignment.release_app_identity.role_definition_name == "Managed Identity Operator" && azurerm_role_assignment.release_app_identity.principal_id == azurerm_user_assigned_identity.release.principal_id
+    error_message = "Release may attach only the application identity, not other managed identities."
+  }
+
+  assert {
     condition     = azurerm_role_assignment.terraform_contributor.role_definition_name == "Contributor" && azurerm_role_assignment.terraform_contributor.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test" && azurerm_role_assignment.terraform_contributor.principal_id == "33333333-3333-3333-3333-333333333333"
     error_message = "The existing Contributor grant must stay on the resource group for the Terraform principal only."
   }

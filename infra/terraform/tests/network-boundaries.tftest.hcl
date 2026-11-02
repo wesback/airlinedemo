@@ -1,8 +1,54 @@
+run "independent_executor_uses_peering_and_shared_blob_dns" {
+  command = plan
+  variables {
+    deployment_executor = {
+      vnet_id          = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-tfstate/providers/Microsoft.Network/virtualNetworks/vnet-executor"
+      blob_dns_zone_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-tfstate/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
+    }
+  }
+  assert {
+    condition = (
+      length(azurerm_virtual_network_peering.app_to_executor) == 1 &&
+      azurerm_virtual_network_peering.app_to_executor[0].remote_virtual_network_id == var.deployment_executor.vnet_id &&
+      azurerm_virtual_network_peering.executor_to_app[0].resource_group_name == "rg-demo-tfstate" &&
+      azurerm_virtual_network_peering.executor_to_app[0].virtual_network_name == "vnet-executor"
+    )
+    error_message = "The independent executor needs scoped peering in both directions."
+  }
+  assert {
+    condition = (
+      !contains(keys(azurerm_private_dns_zone.demo), "blob") &&
+      !contains(keys(azurerm_private_dns_zone_virtual_network_link.executor), "blob") &&
+      azurerm_private_dns_zone_virtual_network_link.demo["blob"].resource_group_name == "rg-demo-tfstate" &&
+      azurerm_private_dns_zone_virtual_network_link.demo["blob"].private_dns_zone_name == "privatelink.blob.core.windows.net" &&
+      length(azurerm_private_dns_zone_virtual_network_link.monitor_executor) == 4 &&
+      alltrue([for link in azurerm_private_dns_zone_virtual_network_link.monitor_executor : link.virtual_network_id == var.deployment_executor.vnet_id]) &&
+      local.blob_dns_zone_id == var.deployment_executor.blob_dns_zone_id
+    )
+    error_message = "The executor and app must share one Blob namespace, not conflicting linked zones."
+  }
+}
+
+run "original_network_creates_no_executor_bridge" {
+  command = plan
+  assert {
+    condition = (
+      length(azurerm_virtual_network_peering.app_to_executor) == 0 &&
+      length(azurerm_virtual_network_peering.executor_to_app) == 0 &&
+      length(azurerm_private_dns_zone_virtual_network_link.executor) == 0 &&
+      length(azurerm_private_dns_zone_virtual_network_link.monitor_executor) == 0 &&
+      contains(keys(azurerm_private_dns_zone.demo), "blob")
+    )
+    error_message = "Without an executor configuration the original network must remain unchanged."
+  }
+}
+
 mock_provider "azuread" {
   mock_data "azuread_client_config" {
     defaults = {
       object_id = "00000000-0000-0000-0000-0000000000d0"
     }
+
   }
   mock_resource "azuread_application" {
     defaults = {
@@ -284,7 +330,7 @@ run "M-13_data_endpoints_are_private" {
     error_message = "The model endpoint must register in its DNS zone group with exactly one private DNS zone."
   }
   assert {
-    condition     = local.private_endpoints.model.zone == "model" && can(regex("(?s)private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
+    condition     = local.private_endpoints.model.zone == "model" && can(regex("private_dns_zone_ids\\s*=\\s*\\[each\\.value\\.zone == \"blob\" \\? local\\.blob_dns_zone_id : azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
     error_message = "The model endpoint's DNS zone group must reference the model privatelink.openai.azure.com zone."
   }
   assert {

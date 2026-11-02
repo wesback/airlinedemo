@@ -164,12 +164,12 @@ run "private_dependency_references" {
       azurerm_private_dns_zone.demo["contentsafety"].name == "privatelink.cognitiveservices.azure.com" &&
       azurerm_private_dns_zone_virtual_network_link.demo["contentsafety"].name == "link-contentsafety" &&
       azurerm_private_dns_zone_virtual_network_link.demo["contentsafety"].private_dns_zone_name == "privatelink.cognitiveservices.azure.com" &&
-      can(regex("(?s)private_dns_zone_group \\{\\s*name\\s*=\\s*\"dzg-\\$\\{each\\.key\\}\"\\s*private_dns_zone_ids\\s*=\\s*\\[azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
+      can(regex("private_dns_zone_ids\\s*=\\s*\\[each\\.value\\.zone == \"blob\" \\? local\\.blob_dns_zone_id : azurerm_private_dns_zone\\.demo\\[each\\.value\\.zone\\]\\.id\\]", file("main.tf")))
     )
     error_message = "Every private endpoint must reference the DNS zone configured for its dependency."
   }
   assert {
-    condition     = azurerm_private_dns_zone_virtual_network_link.demo["acr"].private_dns_zone_name == "privatelink.azurecr.io" && can(regex("(?s)resource \"azurerm_private_endpoint\" \"demo\" \\{.*subnet_id\\s*=\\s*azurerm_subnet\\.private_endpoints\\.id.*private_connection_resource_id\\s*=\\s*each\\.value\\.resource_id", file("main.tf"))) && can(regex("(?s)resource \"azurerm_private_dns_zone_virtual_network_link\" \"demo\" \\{.*private_dns_zone_name\\s*=\\s*azurerm_private_dns_zone\\.demo\\[each\\.key\\]\\.name.*virtual_network_id\\s*=\\s*azurerm_virtual_network\\.demo\\.id", file("main.tf")))
+    condition     = azurerm_private_dns_zone_virtual_network_link.demo["acr"].private_dns_zone_name == "privatelink.azurecr.io" && can(regex("(?s)resource \"azurerm_private_endpoint\" \"demo\" \\{.*subnet_id\\s*=\\s*azurerm_subnet\\.private_endpoints\\.id.*private_connection_resource_id\\s*=\\s*each\\.value\\.resource_id", file("main.tf"))) && can(regex("(?s)resource \"azurerm_private_dns_zone_virtual_network_link\" \"demo\" \\{.*private_dns_zone_name\\s*=\\s*each\\.value.*virtual_network_id\\s*=\\s*azurerm_virtual_network\\.demo\\.id", file("main.tf")))
     error_message = "Private endpoints must use the configured private endpoint subnet and DNS zone, and DNS links must use the configured VNet."
   }
 }

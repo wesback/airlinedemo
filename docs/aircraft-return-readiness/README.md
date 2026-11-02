@@ -48,6 +48,8 @@ Keep non-secret Terraform inputs in a reviewed file outside tracked paths and pa
 
 ## Setup and deployment
 
+For the minimal-input, end-to-end route, use the [private Azure deployment manual](../deployment.md). It provisions the independent backend/executor, runs SQL initialization and all migrations, coordinates the signed release, verifies role/model access and restart durability, and documents safe rebuild/resume. Tenant ID and subscription ID are the only required Azure arguments. The instructions below describe the lower-level path for operators who already have private connectivity and externally managed prerequisites; Terraform provisioning alone does not initialize SQL.
+
 Run `scripts/prebootstrap-deployment.sh` before the operator bootstrap to
 verify tools, Azure identity, external variable/backend files, provider
 registration, and Terraform formatting. Use

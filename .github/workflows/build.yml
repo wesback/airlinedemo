@@ -204,6 +204,7 @@ jobs:
           name: supply-chain-evidence
           path: artifacts/
           retention-days: 90
+          overwrite: true
 
   publish-image:
     needs: build-and-gate
@@ -285,3 +286,4 @@ jobs:
           name: image-digest
           path: artifacts/image/digest.txt
           retention-days: 90
+          overwrite: true

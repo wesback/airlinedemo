@@ -77,6 +77,9 @@ class LifecycleScriptTests(unittest.TestCase):
 
     def _terraform_body(self):
         return ('if [ "${TF_FAIL:-0}" = "1" ] && echo "$*" | grep -q " destroy "; then exit 1; fi\n'
+                'if echo "$*" | grep -q " show -json "; then\n'
+                '  printf \'{"resource_changes":[{"address":"azurerm_resource_group.demo","change":{"actions":["%s"],"before":{"id":"%s"}}}]}\\n\' "${PLAN_ACTION:-delete}" "${PLAN_GROUP:-$STATE_ID}"\n'
+                'fi\n'
                 'if echo "$*" | grep -q " state show "; then\n'
                 '  if [ "${STATE_SHOW_FAIL:-0}" = "1" ]; then exit 1; fi\n'
                 '  if [ "${STATE_ID_MISSING:-0}" = "1" ]; then exit 0; fi\n'
@@ -132,6 +135,40 @@ class LifecycleScriptTests(unittest.TestCase):
         declined = self.run_script(BOOTSTRAP, input_text="no\n")
         self.assertNotEqual(0, declined.returncode)
         self.assertFalse(any(" apply " in c for c in self.calls()))
+
+    def test_destroy_can_save_plan_without_deleting_resources(self):
+        result = self.run_script(DESTROY, args=("--plan-only", "/tmp/reviewed-destroy.tfplan"))
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(any(" plan -destroy " in call and "-out=/tmp/reviewed-destroy.tfplan" in call
+                            for call in self.calls()))
+        self.assertFalse(any(" apply " in call or " destroy " in call for call in self.calls()))
+
+    def test_saved_destroy_plan_is_verified_and_applied_exactly(self):
+        result = self.run_script(DESTROY, args=("--yes", "--apply-plan", "/tmp/reviewed-destroy.tfplan"))
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, len([c for c in self.calls() if c.endswith(" apply /tmp/reviewed-destroy.tfplan")]))
+        self.assertFalse(any(" plan " in c or " destroy " in c for c in self.calls()))
+
+    def test_destroy_plan_can_be_checked_without_deleting_anything(self):
+        result = self.run_script(DESTROY, args=("--check-plan", "/tmp/reviewed-destroy.tfplan"))
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("Verified saved destroy plan for rg-airline-demo; nothing applied.\n", result.stdout)
+        self.assertFalse(any(" apply " in call or " destroy " in call for call in self.calls()))
+        self.log.unlink(missing_ok=True)
+        invalid = self.run_script(DESTROY, args=("--check-plan", "/tmp/reviewed-destroy.tfplan"),
+                                  env=dict(self.env, PLAN_ACTION="update"))
+        self.assertNotEqual(0, invalid.returncode)
+        self.assertFalse(any(" apply " in call or " destroy " in call for call in self.calls()))
+
+    def test_saved_plan_rejects_different_scope_or_non_destroy_actions(self):
+        for overrides in ({"PLAN_GROUP": "/subscriptions/other/resourceGroups/rg-other"},
+                          {"PLAN_ACTION": "update"}):
+            with self.subTest(overrides=overrides):
+                self.log.unlink(missing_ok=True)
+                result = self.run_script(DESTROY, args=("--yes", "--apply-plan", "/tmp/reviewed-destroy.tfplan"),
+                                         env=dict(self.env, **overrides))
+                self.assertNotEqual(0, result.returncode)
+                self.assertFalse(any(" apply " in c for c in self.calls()))
 
     def test_destroy_confirmation_authentication_and_success_output(self):
         success = self.run_script(DESTROY, args=("--yes",))

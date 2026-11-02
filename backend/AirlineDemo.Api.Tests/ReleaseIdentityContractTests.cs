@@ -39,7 +39,9 @@ public sealed class ReleaseIdentityContractTests
                 "gateway_content_safety",
                 "migration_sql",
                 "release_acr_push",
+                "release_app_identity",
                 "release_container_app",
+                "release_environment",
                 "release_signing_certificate",
                 "release_signing_key",
                 "telemetry_reader",
@@ -87,7 +89,7 @@ public sealed class ReleaseIdentityContractTests
             new[] { "build", "release" },
             Regex.Matches(release, @"(?m)^resource\s+""azurerm_federated_identity_credential""\s+""(\w+)""").Select(m => m.Groups[1].Value).ToArray());
         Assert.Equal(
-            new[] { "build_acr_push", "release_acr_push", "release_signing_key", "release_signing_certificate", "release_container_app" },
+            new[] { "release_environment", "release_app_identity", "build_acr_push", "release_acr_push", "release_signing_key", "release_signing_certificate", "release_container_app" },
             RoleAssignmentName.Matches(release).Select(m => m.Groups[1].Value).ToArray());
         Assert.Empty(OutputName.Matches(release));
 

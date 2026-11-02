@@ -17,6 +17,12 @@ resource "azurerm_storage_container" "evidence" {
   name                  = "evidence"
   storage_account_id    = azurerm_storage_account.blob.id
   container_access_type = "private"
+  depends_on = [
+    azurerm_private_endpoint.demo,
+    azurerm_private_dns_zone_virtual_network_link.executor,
+    azurerm_virtual_network_peering.app_to_executor,
+    azurerm_virtual_network_peering.executor_to_app,
+  ]
 }
 
 # App identity: model invocation, evidence container, and telemetry publishing.
@@ -194,7 +200,7 @@ resource "azurerm_private_endpoint" "monitor" {
     name = "dzg-monitor"
     private_dns_zone_ids = concat(
       [for k in sort(keys(local.monitor_private_dns_zones)) : azurerm_private_dns_zone.monitor[k].id],
-      [azurerm_private_dns_zone.demo["blob"].id],
+      [local.blob_dns_zone_id],
     )
   }
 

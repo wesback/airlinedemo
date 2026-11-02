@@ -262,6 +262,16 @@ class DeployScriptTests(unittest.TestCase):
         self.assertFalse([c for c in self.calls() if c.startswith(("az keyvault recover", "az group create --name rg-demo1 "))])
         self.assertIsNone(json.loads((self.state / "demo1/deploy.tfvars.json").read_text())["adopt_key_vault"])
 
+    def test_vault_recovery_never_enables_public_access_even_with_legacy_ip_flag(self):
+        suffix = hashlib.sha1(f"{SUBSCRIPTION}/demo1".encode()).hexdigest()[:6]
+        vault = f"kv-demo1-{suffix}"
+        result = self.run_deploy("--register-providers", "--vault-allow-my-ip",
+                                 env=dict(self.env, FAKE_DELETED_VAULT=vault))
+        self.assertEqual(4, result.returncode, result.stderr)
+        self.assertIn(f"az keyvault update --name {vault} --public-network-access Disabled --output none", self.calls())
+        self.assertFalse(any("--public-network-access Enabled" in call or "keyvault network-rule add" in call
+                             for call in self.calls()))
+
     def test_invalid_cidr_is_rejected(self):
         result = self.run_deploy("--prepare-only", "--presenter-cidrs", "203.0.113.0/24,evil")
         self.assertEqual(2, result.returncode)
