@@ -105,6 +105,7 @@ All systems, records, actors and decisions are synthetic or simulated.
 | DD-026 | DD-026: A source coverage flag is true only when the source mode is available and at least one in-scope record from that source is present; otherwise it is false. |
 | DD-027 | DD-027: For Cases A, B, and C, the signed source fixtures are the canonical identifier set; any Aircraft Case Pack artifact for those scenarios uses the same case, document, and component identifiers. |
 | DD-028 | DD-028: For repeated exports of the same recorded decision, serialized bytes are identical after removing the `exportedAt` field; `contentHash` covers every other field except `contentHash` itself. This rule follows AC-024 and DD-016. |
+| DD-033 | This delivery adds no package dependency and reuses the existing application packages. This is a selected design choice, not a repository-wide prohibition; any demonstrated dependency need is reviewed by the PRD owner under repository policy. The fixture rehearsal uses no external runtime service. |
 
 ## Product Goals
 
@@ -277,7 +278,7 @@ Not applicable to the original scope; display of the summary is a dashboard or H
 |---|---|---|---|---|
 | CON-001 | Handle synthetic data only (ARR:CON-001). | Operational | ARR imposes the synthetic-data boundary. | No real data. An exception requires an owner-approved ARR PRD change. |
 | CON-002 | Add no ARR lifecycle state or role for arrival, and no new agent or orchestrator. | Architectural | DD-014 and the confirmed arrival scope retain the existing workflow and roles; ARR:DD-010 forbids a second orchestrator and long-lived agents. | A change to this scope requires a user-approved PRD amendment; any conflict with ARR also requires an ARR amendment. |
-| CON-003 | This PRD adds no Azure resource, Terraform, package dependency, or change under `.github/` or `.ai-sdlc/`. | Delivery | The requested fixture rehearsal has no external runtime dependency. Reusing the existing packages is this proposed PRD's design choice, not a user-imposed or repository-wide package ban; `AGENTS.md` permits justified additions and governs protected paths. | Changing this delivery scope requires PRD owner review and the applicable repository write and merge policy. |
+| CON-003 | Arrival stories do not edit `.ai-sdlc/`, `AGENTS.md`, or other root CI files. They do not edit `.github/` except that a needed `.github/workflows/` change has its own person-merged story. | Delivery | `AGENTS.md` limits implementer write scope for these files, and AI-SDLC does not merge changes under `.github/`. | Keep protected-file work outside arrival stories; isolate any required workflow change for the person-merge gate. |
 | CON-004 | Run the five source stubs in-process (DD-001). | Architectural | The requested scenario excludes separately deployed source systems. | A stub-deployment change requires a user-approved change to this PRD. |
 
 ## Process Models
@@ -622,19 +623,19 @@ Progress: arrival criteria AC-040 through AC-068 are not started; this addendum 
 
 No separate source systems, real data, new infrastructure, package dependencies, agents, or changes to signed fixture contracts, manifests or signatures are in scope. The requested fixture rehearsal has no external runtime dependency; this PRD's no-package choice is narrower than the repository's package-addition allowance. In-process stubs follow DD-001, synthetic-only data follow ARR:CON-001, and the no-new-role or lifecycle-state boundary is a confirmed feature constraint and follows DD-014. [Main CI after #706](https://github.com/wesback/airlinedemo/actions/runs/41441554685) and [the preceding main CI](https://github.com/wesback/airlinedemo/actions/runs/41434791573) report that the `maintenance` manifest signature does not verify against the trust key. This predates the arrival addendum and blocks the fixture-only rehearsal until the release owner or key holder restores verification separately. A fixture-only rehearsal stops before package submission; an actual model-backed investigation is a separate optional continuation.
 
-The human merge is the PRD approval gate: **@wesback is the named reviewer, approver and merger, and that review, approval and merge are pending**. Only after that merge does the repository pipeline perform its quality, security and functional planning and create implementation stories; no production implementation is authorized by this draft.
+The human merge is the PRD approval gate: **@wesback is the named reviewer, approver and merger; the PRD correction was merged in #707. @wesback approved implementation as owner on 2026-11-02.** The repository pipeline performs quality, security and functional planning and creates implementation stories; production stories remain gated on its output.
 
 ## Sign-Off
 
 ### Approval Checklist
 
-* Product Owner: Not approved.
+* Product Owner: Approved by @wesback on 2026-11-02.
 * Engineering Reviewer: Not approved.
 * Security and Privacy Reviewer: Not assigned; synthetic data only, advisory.
 * Legal/Compliance: Not assigned; synthetic data only.
-* Arrival addendum reviewer and merger: @wesback — review, approval and merge pending.
+* Arrival addendum reviewer and merger: @wesback — #707 merged; implementation approval recorded above.
 
-Approval date: Not approved.
+Approval date: 2026-11-02.
 
 ### Waivers
 
@@ -642,7 +643,7 @@ None requested.
 
 ### Handoff Readiness
 
-Draft only. No implementation story is approved until a named person approves this PRD pull request and the prerequisite delivery gate in MVP and Release Framing is satisfied. A merged PRD is planned into stories by the pipeline (threat model, then stories); say in the pull request whether it needs ARR amendment AS-002 first. The telemetry approval record (DD-025) is a separate pull request a person merges; the stories that add the four attributes depend on it.
+The arrival scope is owner-approved. No production story begins until the correction PR is merged and the post-merge pipeline has completed quality, security and functional planning. A merged PRD is planned into stories by the pipeline (threat model, then stories); say in the pull request whether it needs ARR amendment AS-002 first. The telemetry approval record (DD-025) is a separate pull request a person merges; the stories that add the four attributes depend on it.
 
 ## Disclaimer
 
