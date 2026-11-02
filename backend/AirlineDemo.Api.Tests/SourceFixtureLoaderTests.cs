@@ -80,15 +80,32 @@ public sealed class SourceFixtureLoaderTests
     private static readonly string[] Sources = ["technical", "maintenance", "finance", "records", "contracts"];
     private static readonly string[] OwningCaseIds = ["arr-core", "case-a", "case-b", "case-c"];
 
-    // AC-004: all five sources load only when every detached signature and manifest check passes.
-    [Fact]
-    public void ValidManifestLoadsAfterSignatureAndManifestValidation()
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Staging")]
+    [InlineData("Production")]
+    public void FixtureSetLoadsWithoutSignaturesInEveryEnvironment(string environment)
     {
-        using var key = RSA.Create(2048);
-        using var dir = new TempDirectory();
-        WriteSet(dir.Path, key);
+        using var directory = new TempDirectory();
+        foreach (var file in Directory.GetFiles(CommittedSources(), "*.json"))
+        {
+            File.Copy(file, Path.Combine(directory.Path, Path.GetFileName(file)));
+        }
 
-        var loaded = SourceFixtureLoader.Load(dir.Path, key.ExportSubjectPublicKeyInfo());
+        Assert.Empty(Directory.GetFiles(directory.Path, "*.sig"));
+        var fixtures = SourceFixtureLoader.Load(directory.Path, environment: environment);
+        Assert.Equal(5, fixtures.Count);
+        Assert.All(Sources, source => Assert.Contains(source, fixtures.Keys));
+    }
+
+    // AC-004: all five sources load when their manifest checks pass.
+    [Fact]
+    public void ValidManifestLoadsAfterManifestValidation()
+    {
+        using var dir = new TempDirectory();
+        WriteSet(dir.Path);
+
+        var loaded = SourceFixtureLoader.Load(dir.Path);
 
         Assert.Equal(5, loaded.Count);
         foreach (var source in Sources)
@@ -98,132 +115,112 @@ public sealed class SourceFixtureLoaderTests
         }
     }
 
-    // AC-005: an invalid signature, unsupported schema, wrong scenario date, wrong digest or wrong count refuses registration.
+    // AC-005: unsupported schema, wrong scenario date, wrong digest or wrong count refuses registration.
     [Fact]
-    public void InvalidSignatureSchemaDateDigestOrCountIsRefused()
+    public void InvalidSchemaDateDigestOrCountIsRefused()
     {
-        using var key = RSA.Create(2048);
-
         using (var dir = new TempDirectory())
         {
-            WriteSet(dir.Path, key);
-            var signaturePath = Path.Combine(dir.Path, "technical.manifest.sig");
-            var signature = File.ReadAllBytes(signaturePath);
-            signature[0] ^= 0xFF;
-            File.WriteAllBytes(signaturePath, signature);
-            AssertRefused(dir.Path, key);
+            WriteSet(dir.Path, schemaVersion: "2");
+            AssertRefused(dir.Path, "schemaVersion '2' is not supported; expected '1'.");
         }
 
         using (var dir = new TempDirectory())
         {
-            WriteSet(dir.Path, key, schemaVersion: "2");
-            AssertRefused(dir.Path, key);
+            WriteSet(dir.Path, scenarioDate: "2026-10-02");
+            AssertRefused(dir.Path, "scenarioDate must be 2026-10-01.");
         }
 
         using (var dir = new TempDirectory())
         {
-            WriteSet(dir.Path, key, scenarioDate: "2026-10-02");
-            AssertRefused(dir.Path, key);
+            WriteSet(dir.Path, digest: new string('0', 64));
+            AssertRefused(dir.Path, "fixture SHA-256 digest does not match the manifest.");
         }
 
         using (var dir = new TempDirectory())
         {
-            WriteSet(dir.Path, key, digest: new string('0', 64));
-            AssertRefused(dir.Path, key);
-        }
-
-        using (var dir = new TempDirectory())
-        {
-            WriteSet(dir.Path, key, declaredCount: 5);
-            AssertRefused(dir.Path, key);
+            WriteSet(dir.Path, declaredCount: 5);
+            AssertRefused(dir.Path, "declared record count 5 does not match 4 records.");
         }
     }
 
-    // AC-005: a missing signature, a missing trust key, or a signature from another key refuses registration,
-    // including when the fixture and its co-located digest are both changed without re-signing.
-    [Fact]
-    public void UntrustedOrMissingSignatureAndTrustKeyAreRefused()
+    [Theory]
+    [InlineData("sha256", "sha256 must be 64 hexadecimal characters.")]
+    [InlineData("recordCounts", "recordCounts is required.")]
+    public void NullManifestFieldsAreRefused(string field, string reason)
     {
-        using var key = RSA.Create(2048);
+        using var dir = new TempDirectory();
+        WriteSet(dir.Path);
+        var path = Path.Combine(dir.Path, "technical.manifest.json");
+        var manifest = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllBytes(path))!;
+        manifest[field] = JsonSerializer.SerializeToElement<string?>(null);
+        File.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(manifest));
 
-        using (var dir = new TempDirectory())
-        {
-            WriteSet(dir.Path, key);
-            File.Delete(Path.Combine(dir.Path, "technical.manifest.sig"));
-            AssertRefused(dir.Path, key);
-        }
+        AssertRefused(dir.Path, reason);
+    }
 
-        using (var dir = new TempDirectory())
-        {
-            WriteSet(dir.Path, key);
-            Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.Load(dir.Path, null));
-        }
+    [Fact]
+    public void ChangedFixtureAndMatchingDigestAreAcceptedWithoutSignatures()
+    {
+        using var dir = new TempDirectory();
+        WriteSet(dir.Path);
+        var fixturePath = Path.Combine(dir.Path, "technical.json");
+        var changedFixture = File.ReadAllBytes(fixturePath).Append((byte)'\n').ToArray();
+        File.WriteAllBytes(fixturePath, changedFixture);
+        File.WriteAllBytes(Path.Combine(dir.Path, "technical.manifest.json"), ManifestBytes(changedFixture));
 
-        using (var dir = new TempDirectory())
-        {
-            using var otherKey = RSA.Create(2048);
-            WriteSet(dir.Path, otherKey);
-            AssertRefused(dir.Path, key);
-        }
+        Assert.Empty(Directory.GetFiles(dir.Path, "*.sig"));
+        Assert.Equal(changedFixture, SourceFixtureLoader.Load(dir.Path)["technical"].FixtureBytes);
+    }
 
-        using (var dir = new TempDirectory())
-        {
-            WriteSet(dir.Path, key);
-            var fixturePath = Path.Combine(dir.Path, "technical.json");
-            var changedFixture = File.ReadAllBytes(fixturePath).Append((byte)'\n').ToArray();
-            File.WriteAllBytes(fixturePath, changedFixture);
-            File.WriteAllBytes(Path.Combine(dir.Path, "technical.manifest.json"), ManifestBytes(changedFixture));
-            AssertRefused(dir.Path, key);
-        }
+    [Fact]
+    public void MissingManifestIsRefused()
+    {
+        using var dir = new TempDirectory();
+        WriteSet(dir.Path);
+        File.Delete(Path.Combine(dir.Path, "technical.manifest.json"));
+        AssertRefused(dir.Path, "manifest file 'technical.manifest.json' is missing.");
     }
 
     // AC-005: a record whose caseId is not a declared owning case refuses registration.
     [Fact]
     public void CaseOwnershipMismatchIsRefused()
     {
-        using var key = RSA.Create(2048);
         using var dir = new TempDirectory();
-        WriteSet(dir.Path, key, recordCaseIds: ["arr-core", "case-a", "case-b", "case-x"]);
+        WriteSet(dir.Path, recordCaseIds: ["arr-core", "case-a", "case-b", "case-x"]);
 
-        AssertRefused(dir.Path, key);
+        AssertRefused(dir.Path, "record caseId 'case-x' is not a declared owning case.");
     }
 
-    // AC-004: a signed fixture set whose sourceFixtureVersion is empty is refused, even though its signature verifies.
+    // AC-004: a fixture set whose sourceFixtureVersion is empty is refused.
     [Fact]
     public void UnsupportedSourceFixtureVersionIsRefused()
     {
-        using var key = RSA.Create(2048);
         using var dir = new TempDirectory();
-        WriteSet(dir.Path, key, sourceFixtureVersion: string.Empty);
+        WriteSet(dir.Path, sourceFixtureVersion: string.Empty);
 
-        AssertRefused(dir.Path, key);
+        AssertRefused(dir.Path, "sourceFixtureVersion is required.");
     }
 
-    // AC-004: a signed fixture set whose sourceFixtureVersion is unknown (non-empty) is refused, even though its signature verifies.
+    // AC-004: a fixture set whose sourceFixtureVersion is unknown (non-empty) is refused.
     [Fact]
     public void UnknownNonEmptySourceFixtureVersionIsRefused()
     {
-        using var key = RSA.Create(2048);
         using var dir = new TempDirectory();
-        WriteSet(dir.Path, key, sourceFixtureVersion: "2026.09.9");
+        WriteSet(dir.Path, sourceFixtureVersion: "2026.09.9");
 
-        AssertRefused(dir.Path, key);
+        AssertRefused(dir.Path, "sourceFixtureVersion '2026.09.9' is not supported; expected '2026.10.1' or '2026.10.2'.");
     }
 
-    // AC-005, NFR-002: a refused load (bad signature, or a publication failure after validation) leaves every published collection unchanged.
+    // AC-005, NFR-002: an invalid digest or publication failure leaves every published collection unchanged.
     [Fact]
     public void ValidationOrPublicationFailureLeavesPublishedStateUnchanged()
     {
-        using var key = RSA.Create(2048);
-        var spki = key.ExportSubjectPublicKeyInfo();
         using var validDir = new TempDirectory();
         using var badDir = new TempDirectory();
-        WriteSet(validDir.Path, key);
-        WriteSet(badDir.Path, key);
-        var signaturePath = Path.Combine(badDir.Path, "technical.manifest.sig");
-        var signature = File.ReadAllBytes(signaturePath);
-        signature[0] ^= 0xFF;
-        File.WriteAllBytes(signaturePath, signature);
+        WriteSet(validDir.Path);
+        WriteSet(badDir.Path);
+        File.AppendAllText(Path.Combine(badDir.Path, "technical.json"), "\n");
 
         var seed = new PublishedFixtureState(
             [new StoredFixturePack("2026.09.1", "aa")],
@@ -234,11 +231,12 @@ public sealed class SourceFixtureLoaderTests
         var store = new SourceFixtureStore(seed);
         var before = Snapshot(store.State);
 
-        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadAndPublish(badDir.Path, spki, store));
+        var error = Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadAndPublish(badDir.Path, store));
+        Assert.Equal("Source fixture 'technical' refused: fixture SHA-256 digest does not match the manifest.", error.Message);
         AssertSnapshot(before, store.State);
 
         Assert.Throws<InvalidOperationException>(() =>
-            SourceFixtureLoader.LoadAndPublish(validDir.Path, spki, store, _ => throw new InvalidOperationException("publication failed")));
+            SourceFixtureLoader.LoadAndPublish(validDir.Path, store, _ => throw new InvalidOperationException("publication failed")));
         AssertSnapshot(before, store.State);
     }
 
@@ -246,21 +244,20 @@ public sealed class SourceFixtureLoaderTests
     [Fact]
     public void ReusedVersionWithDifferentContentIsRefused()
     {
-        using var key = RSA.Create(2048);
-        var spki = key.ExportSubjectPublicKeyInfo();
         using var validDir = new TempDirectory();
         using var changedDir = new TempDirectory();
-        WriteSet(validDir.Path, key);
-        WriteSet(changedDir.Path, key, recordCaseIds: ["arr-core", "case-a", "case-b", "arr-core"]);
+        WriteSet(validDir.Path);
+        WriteSet(changedDir.Path, recordCaseIds: ["arr-core", "case-a", "case-b", "arr-core"]);
 
         var store = new SourceFixtureStore(PublishedFixtureState.Empty);
-        Assert.Equal(SourceFixturePublication.Published, SourceFixtureLoader.LoadAndPublish(validDir.Path, spki, store));
+        Assert.Equal(SourceFixturePublication.Published, SourceFixtureLoader.LoadAndPublish(validDir.Path, store));
         var before = Snapshot(store.State);
 
-        Assert.Equal(SourceFixturePublication.AlreadyPublished, SourceFixtureLoader.LoadAndPublish(validDir.Path, spki, store));
+        Assert.Equal(SourceFixturePublication.AlreadyPublished, SourceFixtureLoader.LoadAndPublish(validDir.Path, store));
         AssertSnapshot(before, store.State);
 
-        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadAndPublish(changedDir.Path, spki, store));
+        var error = Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadAndPublish(changedDir.Path, store));
+        Assert.Equal("Source fixture version '2026.10.1' is already stored with different content; publication is refused.", error.Message);
         AssertSnapshot(before, store.State);
     }
 
@@ -268,7 +265,7 @@ public sealed class SourceFixtureLoaderTests
 
     private static void CopyDirectory(string from, string to)
     {
-        foreach (var file in Directory.GetFiles(from)) File.Copy(file, Path.Combine(to, Path.GetFileName(file)));
+        foreach (var file in Directory.GetFiles(from, "*.json")) File.Copy(file, Path.Combine(to, Path.GetFileName(file)));
     }
 
     private static List<JsonElement> CommittedRecords(string source)
@@ -277,9 +274,9 @@ public sealed class SourceFixtureLoaderTests
         return document.RootElement.GetProperty("records").EnumerateArray().Select(record => record.Clone()).ToList();
     }
 
-    // AC-004: every record in each committed signed fixture carries a JSON boolean true synthetic marker.
+    // AC-004: every record in each committed fixture carries a JSON boolean true synthetic marker.
     [Fact]
-    public void AC004_all_signed_fixture_records_are_synthetic()
+    public void AC004_all_fixture_records_are_synthetic()
     {
         foreach (var source in Sources)
         {
@@ -308,7 +305,7 @@ public sealed class SourceFixtureLoaderTests
 
     // AC-004: each CoreManifest and committed sidecar describes the exact fixture bytes and record count.
     [Fact]
-    public void AC004_default_di_manifests_match_all_signed_fixture_sets()
+    public void AC004_default_di_manifests_match_all_fixture_sets()
     {
         var coreManifests = new Dictionary<string, SourceFixtureManifest>
         {
@@ -318,6 +315,7 @@ public sealed class SourceFixtureLoaderTests
             ["records"] = RecordsSource.CoreManifest,
             ["contracts"] = ContractsSource.CoreManifest,
         };
+        var counts = Sources.ToDictionary(source => source, source => CommittedRecords(source).Count);
 
         foreach (var source in Sources)
         {
@@ -330,6 +328,10 @@ public sealed class SourceFixtureLoaderTests
 
             using var sidecar = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(CommittedSources(), $"{source}.manifest.json")));
             AssertManifestMetadata(sidecar.RootElement, source, digest, recordCount);
+            foreach (var (countSource, expectedCount) in counts)
+            {
+                Assert.Equal(expectedCount, sidecar.RootElement.GetProperty("recordCounts").GetProperty(countSource).GetInt32());
+            }
         }
     }
 
@@ -369,7 +371,7 @@ public sealed class SourceFixtureLoaderTests
 
     // AC-004: the core case and Cases A, B and C each have records in all five sources, with the scenario each case exists to show.
     [Fact]
-    public void AC004_signed_fixtures_cover_core_and_three_scenarios_in_every_source()
+    public void AC004_fixtures_cover_core_and_three_scenarios_in_every_source()
     {
         string[] coreCases = ["case-001", "case-a", "case-b", "case-c"];
         foreach (var source in Sources)
@@ -413,29 +415,20 @@ public sealed class SourceFixtureLoaderTests
             record.GetProperty("caseId").GetString() == "case-c" && record.GetProperty("payload").GetProperty("parseStatus").GetString() == "blocked");
 
         // A record whose case ID is outside the manifest's owning IDs is refused.
-        using var key = RSA.Create(2048);
         using var dir = new TempDirectory();
-        WriteSet(dir.Path, key, recordCaseIds: ["arr-core", "case-a", "case-b", "case-x"]);
-        AssertRefused(dir.Path, key);
+        WriteSet(dir.Path, recordCaseIds: ["arr-core", "case-a", "case-b", "case-x"]);
+        AssertRefused(dir.Path, "record caseId 'case-x' is not a declared owning case.");
     }
 
-    // AC-005, M-05: a changed fixture whose co-located digest is updated while its detached signature stays unchanged is refused, and
-    // the published state (all five collections, including unrelated case data) is exactly what it was.
+    // AC-005: a fixture whose digest no longer matches is refused without changing published state.
     [Fact]
-    public void AC005_signed_fixture_mismatch_refuses_publication_without_state_change()
+    public void AC005_fixture_digest_mismatch_refuses_publication_without_state_change()
     {
-        using var key = RSA.Create(2048);
-        var spki = key.ExportSubjectPublicKeyInfo();
         using var dir = new TempDirectory();
-        WriteSet(dir.Path, key);
+        WriteSet(dir.Path);
 
         var fixturePath = Path.Combine(dir.Path, "technical.json");
-        var changed = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(File.ReadAllBytes(fixturePath)).Replace("\"records\":[", "\"records\":[{\"caseId\":\"arr-core\"},"));
-        File.WriteAllBytes(fixturePath, changed);
-        var manifestPath = Path.Combine(dir.Path, "technical.manifest.json");
-        var manifest = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllBytes(manifestPath))!;
-        manifest["sha256"] = JsonSerializer.SerializeToElement(Convert.ToHexString(SHA256.HashData(changed)).ToLowerInvariant());
-        File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(manifest));   // digest updated, signature untouched
+        File.AppendAllText(fixturePath, "\n");
 
         var seed = new PublishedFixtureState(
             [new StoredFixturePack("2026.09.1", "aa")],
@@ -446,7 +439,8 @@ public sealed class SourceFixtureLoaderTests
         var store = new SourceFixtureStore(seed);
         var before = Snapshot(store.State);
 
-        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadAndPublish(dir.Path, spki, store));
+        var error = Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadAndPublish(dir.Path, store));
+        Assert.Equal("Source fixture 'technical' refused: fixture SHA-256 digest does not match the manifest.", error.Message);
         AssertSnapshot(before, store.State);
         Assert.Equal(seed.Packs, store.State.Packs);
         Assert.Equal(seed.SourceRecords, store.State.SourceRecords);
@@ -455,33 +449,17 @@ public sealed class SourceFixtureLoaderTests
         Assert.Equal(seed.CaseData, store.State.CaseData);
     }
 
-    // M-05: all five committed signatures verify against the production pinned key; removing or corrupting any one refuses the set;
-    // fixtures signed with the existing test key remain accepted through the test-key seam.
     [Fact]
-    public void M05_all_five_fixture_signatures_are_required()
+    public void EveryFixtureDigestIsValidatedWithoutSignatures()
     {
-        Assert.Equal(5, SourceFixtureLoader.LoadPinned(CommittedSources()).Count);
-
         foreach (var source in Sources)
         {
-            using var removed = new TempDirectory();
-            CopyDirectory(CommittedSources(), removed.Path);
-            File.Delete(Path.Combine(removed.Path, $"{source}.manifest.sig"));
-            Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadPinned(removed.Path));
-
-            using var corrupted = new TempDirectory();
-            CopyDirectory(CommittedSources(), corrupted.Path);
-            var signaturePath = Path.Combine(corrupted.Path, $"{source}.manifest.sig");
-            var signature = File.ReadAllBytes(signaturePath);
-            signature[0] ^= 0xFF;
-            File.WriteAllBytes(signaturePath, signature);
-            Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.LoadPinned(corrupted.Path));
+            using var dir = new TempDirectory();
+            CopyDirectory(CommittedSources(), dir.Path);
+            File.AppendAllText(Path.Combine(dir.Path, $"{source}.json"), "\n");
+            var error = Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.Load(dir.Path));
+            Assert.Equal($"Source fixture '{source}' refused: fixture SHA-256 digest does not match the manifest.", error.Message);
         }
-
-        using var testKey = RSA.Create(2048);
-        using var testDir = new TempDirectory();
-        WriteSet(testDir.Path, testKey);
-        Assert.Equal(5, SourceFixtureLoader.Load(testDir.Path, testKey.ExportSubjectPublicKeyInfo()).Count);
     }
 
     private static (IReadOnlyList<StoredFixturePack> Packs, IReadOnlyList<StoredSourceRecord> Records, IReadOnlyList<StoredBasisPin> Pins, IReadOnlyList<StoredAuditEvent> Audits, IReadOnlyList<StoredCaseDatum> Cases) Snapshot(PublishedFixtureState state) =>
@@ -498,12 +476,12 @@ public sealed class SourceFixtureLoaderTests
         Assert.Equal(expected.Cases, actual.CaseData);
     }
 
-    private static void AssertRefused(string directory, RSA trustKey) =>
-        Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.Load(directory, trustKey.ExportSubjectPublicKeyInfo()));
+    private static void AssertRefused(string directory, string reason) =>
+        Assert.Equal($"Source fixture 'technical' refused: {reason}",
+            Assert.Throws<SourceFixtureRefusedException>(() => SourceFixtureLoader.Load(directory)).Message);
 
     private static void WriteSet(
         string directory,
-        RSA signingKey,
         string schemaVersion = "1",
         string scenarioDate = "2026-10-01",
         string? digest = null,
@@ -535,9 +513,6 @@ public sealed class SourceFixtureLoaderTests
 
             File.WriteAllBytes(Path.Combine(directory, $"{source}.json"), fixture);
             File.WriteAllBytes(Path.Combine(directory, $"{source}.manifest.json"), manifest);
-            File.WriteAllBytes(
-                Path.Combine(directory, $"{source}.manifest.sig"),
-                signingKey.SignData(manifest, HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
         }
     }
 

@@ -105,9 +105,9 @@ The `cape_town_interest` kind is a separate typed evidence payload with exactly 
 
 The payload has no `relatedRequirementId` field. A finding that relies on this evidence must have a `relatedRequirementId` matching exactly and case-sensitively a `specialist_flag` whose topic is `cape_town`; otherwise assessment refuses the finding. A matching finding is routed to internal review and includes a source-record witness and the typed evidence. The evidence does not determine priority, remedy, outcome, recoverability or any legal result.
 
-## Signed fixture cases
+## Fixture cases
 
-Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `contracts`) ships one fixture file under `backend/AirlineDemo.Api/Fixtures/sources/`, with a manifest (`<source>.manifest.json`) and a detached signature (`<source>.manifest.sig`). The manifest lists `owningCaseIds` (`case-001`, `case-a`, `case-b`, `case-c`), the SHA-256 digest of the fixture file and the record count of every source. Every record's `caseId` must be one of the owning IDs, and each source holds at least one record for each case.
+Each of the five sources (`technical`, `maintenance`, `finance`, `records`, `contracts`) ships one fixture file under `backend/AirlineDemo.Api/Fixtures/sources/` with a manifest (`<source>.manifest.json`). The manifest lists `owningCaseIds`, the SHA-256 digest of the fixture file and the record count of every source. Every record's `caseId` must be one of the owning IDs, and each source holds at least one record for `case-001`, `case-a`, `case-b` and `case-c`.
 
 | Case | Scenario the case exists to show | Where |
 |---|---|---|
@@ -122,17 +122,11 @@ The new finance records use the typed kind `maintenance_reserve` with the common
 
 The contracts fixture contains seven synthetic `specialist_flag` records: one each for `cape_town`, `ifrs16`, `gdpr` and `other`, and three for `sanctions` (regimes `EU`, `US` and `UK`). Each record has a distinct related requirement identifier and one of the accepted result values. It also contains one synthetic `cape_town_interest` record with reference-only values and no legal conclusion.
 
-Pack `2026.10.2` adds six technical applicability records on `case-001` for those existing Cape Town, GDPR, IFRS 16 and EU/US/UK sanctions requirement IDs. Their responsible party is `unassigned`: the fixture does not invent a customer's ownership decision, so these rows need review. The previous pack version remains readable, but new publication uses `2026.10.2`; changing an already-published version's content remains refused. Every manifest declares the complete count table: technical 19, maintenance 6, finance 7, records 10 and contracts 12. IATA is absent because no applicability record establishes it.
+Pack `2026.10.2` adds six technical applicability records on `case-001` for those existing Cape Town, GDPR, IFRS 16 and EU/US/UK sanctions requirement IDs. Their responsible party is `unassigned`: the fixture does not invent a customer's ownership decision, so these rows need review. The previous pack version remains readable, but new publication uses `2026.10.2`; changing an already-published version's content remains refused. Every manifest declares the complete count table: technical 19, maintenance 7, finance 7, records 10 and contracts 12. IATA is absent because no applicability record establishes it.
 
-### Signing
+### Fixture validation
 
-The detached signature is RSA-PSS over the bytes of `<source>.manifest.json`, hash SHA-256, salt length 32 bytes, verified against the public key pinned in `SourceFixtureLoader`. The private key is held by the release owner and is never in the repository. It is kept on the maintainer's machine at `~/release-keys/airlinedemo-fixtures.pem` (mode 600, backed up by the owner). If it is lost, generate a new key pair, pin its public key (SubjectPublicKeyInfo DER, base64) in `SourceFixtureLoader` and re-sign all five manifests. After any change to a fixture or manifest, the release owner re-signs all five manifests:
-
-```
-openssl dgst -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 \
-  -sign <release-key.pem> -out backend/AirlineDemo.Api/Fixtures/sources/<source>.manifest.sig \
-  backend/AirlineDemo.Api/Fixtures/sources/<source>.manifest.json
-```
+The loader computes SHA-256 from each fixture and checks it against its manifest, along with schema, version, date, counts and case ownership. It requires no signing key or detached signature in any environment; existing signature files are ignored. A hash detects a mismatch but does not establish authorship if both the fixture and manifest change. Repository review is the trust boundary for these synthetic files.
 
 The digests and record counts that each `*Source.cs` carries in `CoreManifest` must match the manifest and the fixture file; the tests refuse a mismatch.
 

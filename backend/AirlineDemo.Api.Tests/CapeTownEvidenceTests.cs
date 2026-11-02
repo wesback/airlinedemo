@@ -150,11 +150,11 @@ public sealed class CapeTownEvidenceTests
     }
 
     [Fact]
-    public void ValidCapeTownFixtureUsesPinnedPublicKey()
+    public void ValidCapeTownFixtureLoadsFromManifest()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources");
-        var pinned = SourceFixtureLoader.LoadPinned(directory);
-        Assert.Contains("contracts", pinned.Keys);
+        var fixtures = SourceFixtureLoader.Load(directory);
+        Assert.Contains("contracts", fixtures.Keys);
         var record = Assert.Single(ReadAll(new ContractsSource()), item => item.Kind == "cape_town_interest");
         Assert.True(record.Synthetic);
         Assert.Equal("con-cape-town-interest-001", record.RecordId);

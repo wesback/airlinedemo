@@ -39,9 +39,9 @@ Open a case, then **Decision dossier > Compliance evidence**. Select a recorded 
 
 The technical review accepts or rejects findings on a whole basis; it is not a separate regulatory decision for every requirement. An untagged requirement, unassigned owner or missing evidence stays **Needs review**. A document-only journey basis has no source applicability pins and therefore shows no tagged regimes; the view does not manufacture evidence from current source records. Historical decisions retain their original pinned versions.
 
-For an in-scope user, **Open source-system case** navigates to the separate synthetic `case-001`; it does not associate that case's records with a pool aircraft. With `Demo:SeedJourney=true`, startup pins signed source records only when this presenter-owned case is still empty. It creates no assessment or human decision. Existing cases, evidence and reviews are never replaced. A populated case retains its existing basis; new fixture tags appear only on a newly gathered basis, not retroactively on historical decisions.
+For an in-scope user, **Open source-system case** navigates to the separate synthetic `case-001`; it does not associate that case's records with a pool aircraft. With `Demo:SeedJourney=true`, startup pins source records only when this presenter-owned case is still empty. It creates no assessment or human decision. Existing cases, evidence and reviews are never replaced. A populated case retains its existing basis; new fixture tags appear only on a newly gathered basis, not retroactively on historical decisions.
 
-The presenter-safe projection exposes identifiers and versions, not source content. Its new presenter permission does not grant access to existing source or dossier endpoints. See the [API and permission contract](source-systems-contract.md#case-evidence-projection). Cape Town records do not establish South African jurisdiction or remedies. No IATA applicability record exists in the current signed source set; the view does not invent an IATA regime.
+The presenter-safe projection exposes identifiers and versions, not source content. Its new presenter permission does not grant access to existing source or dossier endpoints. See the [API and permission contract](source-systems-contract.md#case-evidence-projection). Cape Town records do not establish South African jurisdiction or remedies. No IATA applicability record exists in the current source set; the view does not invent an IATA regime.
 
 ## Azure portal evidence: deployed controls
 
@@ -56,7 +56,7 @@ Read-only inspection of `rg-demoair` in Sweden Central on 2026-10-30 confirmed t
 
 `cae-demoair` had an empty Container Apps logging destination and no Log Analytics configuration at inspection. The evaluation activity source is not exported end-to-end to Application Insights. Monitor resources and `pe-monitor` alone do not prove application traces or Container Apps console logs are collected. Enabling missing diagnostics is a separate infrastructure change, not part of this read-only view.
 
-**Stubs / design-only:** the five source-system adapters use signed synthetic fixtures. Live sanctions screening, registry queries, South African jurisdiction checks, IFRS 16 classification and GDPR rights handling are not deployed integrations. The application supplies traceable evidence and controls; the customer owns applicability and the resulting decisions.
+**Stubs / design-only:** the five source-system adapters use hash-validated synthetic fixtures. Live sanctions screening, registry queries, South African jurisdiction checks, IFRS 16 classification and GDPR rights handling are not deployed integrations. The application supplies traceable evidence and controls; the customer owns applicability and the resulting decisions.
 
 ## Limits to state out loud
 

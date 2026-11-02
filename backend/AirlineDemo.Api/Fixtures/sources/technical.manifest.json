@@ -4,5 +4,5 @@
   "scenarioDate": "2026-10-01",
   "owningCaseIds": ["case-001", "case-a", "case-b", "case-c"],
   "sha256": "766a833cbba7fca3f454f33a0de111d5b7d38729ed3097037ae7b75f4182b0dc",
-  "recordCounts": { "technical": 19, "maintenance": 6, "finance": 7, "records": 10, "contracts": 12 }
+  "recordCounts": { "technical": 19, "maintenance": 7, "finance": 7, "records": 10, "contracts": 12 }
 }

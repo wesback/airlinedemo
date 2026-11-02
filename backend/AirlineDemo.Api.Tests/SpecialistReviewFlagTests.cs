@@ -145,7 +145,7 @@ public sealed class SpecialistReviewFlagTests
     {
         _ = new ContractsSource();
         var committed = Path.Combine(AppContext.BaseDirectory, "Fixtures", "sources");
-        var pinned = SourceFixtureLoader.LoadPinned(committed);
+        var pinned = SourceFixtureLoader.Load(committed);
         Assert.Equal(5, pinned.Count);
         var contracts = pinned["contracts"];
         Assert.Equal(12, contracts.Manifest.RecordCounts["contracts"]);
@@ -182,9 +182,8 @@ public sealed class SpecialistReviewFlagTests
                 .Distinct(StringComparer.Ordinal).Count());
         }
 
-        using var key = RSA.Create(2048);
         using var directory = new TempDirectory();
-        WriteFixtureSet(directory.Path, key);
+        WriteFixtureSet(directory.Path);
         var seed = new PublishedFixtureState(
             [new StoredFixturePack("2026.09.1", "seed")],
             [new StoredSourceRecord("technical", "2026.09.1", 0, "case-001")],
@@ -193,7 +192,7 @@ public sealed class SpecialistReviewFlagTests
             [new StoredCaseDatum("case-001", "unchanged")]);
         var store = new SourceFixtureStore(seed);
         Assert.Equal(SourceFixturePublication.Published,
-            SourceFixtureLoader.LoadAndPublish(directory.Path, key.ExportSubjectPublicKeyInfo(), store));
+            SourceFixtureLoader.LoadAndPublish(directory.Path, store));
         var before = Snapshot(store.State);
 
         var fixturePath = Path.Combine(directory.Path, "contracts.json");
@@ -206,8 +205,9 @@ public sealed class SpecialistReviewFlagTests
             Convert.ToHexString(SHA256.HashData(changed)).ToLowerInvariant());
         File.WriteAllBytes(manifestPath, JsonSerializer.SerializeToUtf8Bytes(updated));
 
-        Assert.Throws<SourceFixtureRefusedException>(() =>
-            SourceFixtureLoader.LoadAndPublish(directory.Path, key.ExportSubjectPublicKeyInfo(), store));
+        var error = Assert.Throws<SourceFixtureRefusedException>(() =>
+            SourceFixtureLoader.LoadAndPublish(directory.Path, store));
+        Assert.Equal("Source fixture version '2026.10.1' is already stored with different content; publication is refused.", error.Message);
         var after = Snapshot(store.State);
         Assert.Equal(before.Packs, after.Packs);
         Assert.Equal(before.Records, after.Records);
@@ -366,7 +366,7 @@ public sealed class SpecialistReviewFlagTests
         (state.Packs.ToArray(), state.SourceRecords.ToArray(), state.BasisPins.ToArray(),
             state.AuditEvents.ToArray(), state.CaseData.ToArray());
 
-    private static void WriteFixtureSet(string directory, RSA key)
+    private static void WriteFixtureSet(string directory)
     {
         foreach (var source in Sources)
         {
@@ -386,8 +386,6 @@ public sealed class SpecialistReviewFlagTests
             });
             File.WriteAllBytes(Path.Combine(directory, $"{source}.json"), fixture);
             File.WriteAllBytes(Path.Combine(directory, $"{source}.manifest.json"), manifest);
-            File.WriteAllBytes(Path.Combine(directory, $"{source}.manifest.sig"),
-                key.SignData(manifest, HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
         }
     }
 

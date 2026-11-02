@@ -54,26 +54,21 @@ public sealed class SourceFixtureStore(PublishedFixtureState initial)
     internal void Commit(PublishedFixtureState next) => state = next;
 }
 
-// Refuse-on-mismatch loader for the five signed source fixtures (PRD FR-002, AC-004, AC-005).
-// The manifest digest detects drift only; the detached RSA-PSS signature establishes authenticity.
+// Refuse-on-mismatch loader for the five source fixtures (PRD FR-002, AC-004, AC-005).
+// The manifest digest detects drift but does not establish authenticity.
 public static class SourceFixtureLoader
 {
     private const string ScenarioDate = "2026-10-01";
 
-    // Release-controlled SubjectPublicKeyInfo (DER, base64) of the fixture signing key. Its private key stays outside the repository.
-    private const string PinnedPublicKeySpkiBase64 =
-        "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxFgH5+yCDqhYsdB8pcJ2oEsYD+o+J3OrXPmaD9NOEEuNxgCf5rjZjyb1usKV9nnpdBpPfkjLn7baD5qmzNFkrjQqB1tR/rykUzGg0nRotAj70B4HGLPwXwQ/squ0bavWbP53OBHIPH0t6n7xREKJV5RKV/0vMuwQAV7yypRO7Ti5Q8PqxOd4W7JEZr4BQnr1trbxwLUHAd1p7J0iZ56Neq0FIANm17e4nD2tU/mX9zc6CvT5inxQ+37dO/KtYz7zEEPYIhY98YpoHhT7HlJKFJh3HQzWTBXF/vAzgEyeIDFX2bUNxylQjDj/txWbcnN4V4DXub/SUWQ90Lo4L85jgQIDAQAB";
-
     private static readonly JsonSerializerOptions ManifestOptions = new() { PropertyNameCaseInsensitive = true };
 
-    // Production registration: verifies the complete set against the pinned application key only.
-    public static IReadOnlyDictionary<string, VerifiedSourceFixture> LoadPinned(
+    public static IReadOnlyDictionary<string, VerifiedSourceFixture> Load(
         string directory, ILogger? logger = null, string environment = "production")
     {
         var diagnosticStartedAt = Stopwatch.GetTimestamp();
         try
         {
-            return Load(directory, Convert.FromBase64String(PinnedPublicKeySpkiBase64));
+            return LoadCore(directory);
         }
         catch
         {
@@ -84,28 +79,12 @@ public static class SourceFixtureLoader
         }
     }
 
-    // Test seam: the trust key is supplied explicitly. A missing key refuses every source.
-    internal static IReadOnlyDictionary<string, VerifiedSourceFixture> Load(string directory, byte[]? trustKeySpki)
+    private static IReadOnlyDictionary<string, VerifiedSourceFixture> LoadCore(string directory)
     {
-        if (trustKeySpki is null || trustKeySpki.Length == 0)
-        {
-            throw new SourceFixtureRefusedException("Trust key is missing; source registration is refused.");
-        }
-
-        using var trustKey = RSA.Create();
-        try
-        {
-            trustKey.ImportSubjectPublicKeyInfo(trustKeySpki, out _);
-        }
-        catch (CryptographicException)
-        {
-            throw new SourceFixtureRefusedException("Trust key is not a valid RSA SubjectPublicKeyInfo; source registration is refused.");
-        }
-
         var verified = new Dictionary<string, VerifiedSourceFixture>(StringComparer.Ordinal);
         foreach (var source in SourceFixtureManifest.RequiredSources)
         {
-            verified[source] = LoadSource(directory, source, trustKey);
+            verified[source] = LoadSource(directory, source);
         }
 
         return verified;
@@ -117,7 +96,6 @@ public static class SourceFixtureLoader
     // beforeCommit is the publication test seam: it runs on the staged state and may throw to simulate a publication failure.
     internal static SourceFixturePublication LoadAndPublish(
         string directory,
-        byte[]? trustKeySpki,
         SourceFixtureStore store,
         Action<PublishedFixtureState>? beforeCommit = null,
         ILogger? logger = null,
@@ -126,7 +104,7 @@ public static class SourceFixtureLoader
         var diagnosticStartedAt = Stopwatch.GetTimestamp();
         try
         {
-            return LoadAndPublishCore(directory, trustKeySpki, store, beforeCommit);
+            return LoadAndPublishCore(directory, store, beforeCommit);
         }
         catch
         {
@@ -137,21 +115,12 @@ public static class SourceFixtureLoader
         }
     }
 
-    internal static SourceFixturePublication LoadPinnedAndPublish(
-        string directory,
-        SourceFixtureStore store,
-        Action<PublishedFixtureState>? beforeCommit,
-        ILogger logger,
-        string environment) =>
-        LoadAndPublish(directory, Convert.FromBase64String(PinnedPublicKeySpkiBase64), store, beforeCommit, logger, environment);
-
     private static SourceFixturePublication LoadAndPublishCore(
         string directory,
-        byte[]? trustKeySpki,
         SourceFixtureStore store,
         Action<PublishedFixtureState>? beforeCommit)
     {
-        var verified = Load(directory, trustKeySpki);
+        var verified = LoadCore(directory);
         var versions = verified.Values.Select(fixture => fixture.Manifest.SourceFixtureVersion).Distinct(StringComparer.Ordinal).ToList();
         if (versions.Count != 1)
         {
@@ -217,17 +186,10 @@ public static class SourceFixtureLoader
         return new PublishedFixtureState(packs, records, pins, audits, current.CaseData);
     }
 
-    private static VerifiedSourceFixture LoadSource(string directory, string source, RSA trustKey)
+    private static VerifiedSourceFixture LoadSource(string directory, string source)
     {
         var fixtureBytes = ReadRequired(directory, $"{source}.json", source, "fixture");
         var manifestBytes = ReadRequired(directory, $"{source}.manifest.json", source, "manifest");
-        var signature = ReadRequired(directory, $"{source}.manifest.sig", source, "signature");
-
-        if (!trustKey.VerifyData(manifestBytes, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss))
-        {
-            throw Refuse(source, "manifest signature does not verify against the trust key.");
-        }
-
         var (manifest, owningCaseIds) = ParseManifest(source, manifestBytes);
 
         var problems = new List<string>(manifest.Validate());

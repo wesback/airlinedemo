@@ -67,7 +67,7 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         return ParseFixture(sourceId, resourceName, manifest, buffer.ToArray(), createPayload, validatePayload);
     }
 
-    // Verifies the fixture bytes against the signed manifest (metadata, digest, record count) before any record is served (AC-004).
+    // Verifies fixture metadata, digest, and record count before any record is served (AC-004).
     internal static IReadOnlyList<SourceRecord<TPayload>> ParseFixture(
         string sourceId,
         string resourceName,
@@ -90,7 +90,7 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         var digest = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
         if (!string.Equals(digest, manifest.Sha256.ToLowerInvariant(), StringComparison.Ordinal))
         {
-            throw new InvalidOperationException($"Source fixture '{resourceName}' does not match its signed digest.");
+            throw new InvalidOperationException($"Source fixture '{resourceName}' does not match its manifest digest.");
         }
 
         var file = JsonSerializer.Deserialize<FixtureFile>(new ReadOnlySpan<byte>(content), new JsonSerializerOptions(JsonSerializerDefaults.Web))
@@ -193,7 +193,7 @@ public abstract class FixtureSourceSystem<TPayload> : ISourceSystem<TPayload> wh
         return new ReadOnlyDictionary<string, string>(fields);
     }
 
-    // JSON shape of a signed source fixture file; field names are camelCase per docs/source-systems-contract.md.
+    // JSON shape of a source fixture file; field names are camelCase per docs/source-systems-contract.md.
     internal sealed class FixtureFile
     {
         public string SourceId { get; set; } = string.Empty;
