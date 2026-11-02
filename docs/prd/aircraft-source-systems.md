@@ -630,10 +630,10 @@ The human merge is the PRD approval gate: **@wesback is the named reviewer, appr
 ### Approval Checklist
 
 * Product Owner: Approved by @wesback on 2026-11-02.
-* Engineering Reviewer: Not approved.
+* Engineering Reviewer: Approved by @wesback on 2026-11-02.
 * Security and Privacy Reviewer: Not assigned; synthetic data only, advisory.
 * Legal/Compliance: Not assigned; synthetic data only.
-* Arrival addendum reviewer and merger: @wesback — #707 merged; implementation approval recorded above.
+* Arrival addendum reviewer and merger: @wesback — #707 and #708 merged; Product Owner and Engineering Reviewer approvals recorded above.
 
 Approval date: 2026-11-02.
 
@@ -643,7 +643,7 @@ None requested.
 
 ### Handoff Readiness
 
-The arrival scope is owner-approved. No production story begins until the correction PR is merged and the post-merge pipeline has completed quality, security and functional planning. A merged PRD is planned into stories by the pipeline (threat model, then stories); say in the pull request whether it needs ARR amendment AS-002 first. The telemetry approval record (DD-025) is a separate pull request a person merges; the stories that add the four attributes depend on it.
+The arrival scope is Product Owner and Engineering Reviewer approved by @wesback on 2026-11-02. The correction PRD is merged, but the formal quality review still blocks on maintenance fixture signature verification; its Engineering Reviewer finding predates the approval recorded above. No production story begins until a fresh quality review passes and post-merge security and functional planning creates the implementation stories. The fixture rehearsal and full suite additionally require the release owner to restore signature verification. The pipeline plans a merged PRD (threat model, then stories); no additional ARR amendment AS-002 is needed first. The telemetry approval record (DD-025) remains a separate person-merged pull request; the stories adding its four attributes depend on it.
 
 ## Disclaimer
 
