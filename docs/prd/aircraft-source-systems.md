@@ -2,11 +2,11 @@
 prd_id: "aircraft-source-systems"
 title: "Synthetic Source-System Stubs and Read-Only Source Port"
 status: "draft"
-version: "0.9.1"
+version: "0.10.0"
 owners: ["Product Owner"]
-reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer"]
+reviewers: ["Engineering Reviewer", "Security and Privacy Reviewer", "@wesback"]
 created_date: "2026-10-16"
-last_updated: "2026-10-19"
+last_updated: "2026-11-02"
 product_goal_ids: ["GOAL-001", "GOAL-002", "GOAL-003"]
 product_goal_smart_status: "deferred"
 fr_to_ac_coverage_threshold_pct: 80.0
@@ -27,7 +27,7 @@ license: "CC-BY 4.0 (Microsoft HVE-Core)"
 
 # Synthetic Source-System Stubs and Read-Only Source Port
 
-> **aircraft-source-systems** | Status: Draft | Version: 0.9.1 | Last Updated: 2026-10-19
+> **aircraft-source-systems** | Status: Draft | Version: 0.10.0 | Last Updated: 2026-11-02
 
 ## Executive Summary
 
@@ -38,6 +38,22 @@ The stubs let the demonstration show the intended shape of the product: a coordi
 Version 0.9.1 closes the planner's open points: the telemetry approval is a recorded human merge gate (DD-025), role-by-source and anti-forgery negative tests are explicit (AC-038, AC-039), and several criteria now state the invariants they prove. Version 0.4.0 withdraws the notice-validity checklist, which is outside the capstone areas. Version 0.3.0 added Cape Town interest evidence records, per-regime sanctions flags, an IFRS 16 flag topic and a personal-data marker, so each regulatory area in the capstone brief has a defined route to its owner. Version 0.2.0 added the controls an auditor or specialist panel will ask about: an exportable decision dossier, regime and responsibility tags on requirements, separate finance record kinds for rent, reserves and deposits, and specialist-review flags that can never read as clearance. They show that the controls work; they do not show regulatory compliance.
 
 This PRD adds no workflow state, role, agent or external action. ARR stays authoritative for case workflow, authority boundaries and the evidence basis. Acceptance criteria describe future verification and are not evidence of delivery.
+
+Version 0.10.0 adds the [arrival source-interaction addendum](#arrival-source-interaction-addendum) for one fresh, opted-in case; all other cases retain their existing behavior.
+
+## Research Readiness
+
+Research status: `Not required`
+
+Rationale: Verified repository source, authorization, persistence and UI contracts, together with the user's resolved decisions, cover this addendum; it introduces no unfamiliar API or external assumption.
+
+Research artifact: Not applicable.
+
+Planning blockers: None.
+
+### Research Finding Dispositions
+
+No external Research was required or performed. Human review, approval and merge remain a separate future gate.
 
 ## Product Context
 
@@ -148,7 +164,7 @@ Following ARR's label table: the source stubs and their reads are `Simulated`; t
 - Any determination or claim of regulatory compliance or applicability (EASA Part-M, FAA 91.417/121.380, Cape Town Convention, IFRS 16, GDPR, EU/US/UK sanctions). Regime tags and flags label fixture scenarios only. Applicability is recorded in a separate compliance claims register, not in this PRD.
 - Any real sanctions screening, Cape Town registry search, lease classification, impairment calculation or data-subject request handling, or legal conclusion.
 - Changes to the frozen 40-case evaluation suite (ARR:DD-033). Any evaluation use of source records is a separate PRD decision.
-- Rendering or client behavior beyond the contract (the dashboard and HG consume the summary).
+- Rendering or client behavior beyond the contract (the dashboard and HG consume the summary), except for the opted-in arrival case in the addendum.
 
 ### Synthetic source content
 
@@ -166,7 +182,7 @@ Each case fixture seeds at least one situation per column-worth of behavior: Cas
 
 ### Read contract
 
-Authenticated `GET /api/v1/cases/{caseId}/sources` returns the source summary (FR-009). Authenticated `GET /api/v1/cases/{caseId}/sources/{sourceId}/records` returns the records of one source for the case. Authenticated `GET /api/v1/cases/{caseId}/decisions/{decisionId}/dossier` returns the decision dossier (FR-011); the actual decision route and identifier are taken from the ARR default branch and recorded in the contract documentation. `POST /api/v1/cases/{caseId}/sources/{sourceId}/mode` is the only new mutation (FR-007). Unsupported versions return 400 `unsupported_contract_version`; unauthenticated reads return 401 with no case data; every envelope carries integer `contractVersion: 1`.
+Authenticated `GET /api/v1/cases/{caseId}/sources` returns the source summary (FR-009). Authenticated `GET /api/v1/cases/{caseId}/sources/{sourceId}/records` returns the records of one source for the case. Authenticated `GET /api/v1/cases/{caseId}/decisions/{decisionId}/dossier` returns the decision dossier (FR-011); the actual decision route and identifier are taken from the ARR default branch and recorded in the contract documentation. `POST /api/v1/cases/{caseId}/sources/{sourceId}/mode` is the only new mutation in the original scope (FR-007); the addendum specifies additional case commands only for the opted-in arrival case. Unsupported versions return 400 `unsupported_contract_version`; unauthenticated reads return 401 with no case data; every envelope carries integer `contractVersion: 1`.
 
 | Type / field | Type and meaning |
 |---|---|
@@ -249,7 +265,7 @@ Out of scope. The demonstrator is a fixed, in-process, four-case fixture set; NF
 
 ### Usability and Accessibility
 
-Not applicable to this PRD; there is no interface requirement. Display of the summary is a dashboard or HG requirement.
+Not applicable to the original scope; display of the summary is a dashboard or HG requirement. The opted-in arrival interface is specified in the addendum.
 
 ## Constraints
 
@@ -261,7 +277,7 @@ Not applicable to this PRD; there is no interface requirement. Display of the su
 
 ## Process Models
 
-Case flow with sources: submit package → coordinator gathers source records through the port → basis pins documents and source records → investigator runs read-only tools (documents and sources) → deterministic policy → review, mock request, reserve draft or obligation draft → human decision. The recorded human decision can be exported as a dossier (FR-011). A non-`available` source adds a blocked, downgraded or review branch (FR-008) and never an automatic request.
+Original case flow with sources: submit package → coordinator gathers source records through the port → basis pins documents and source records → investigator runs read-only tools (documents and sources) → deterministic policy → review, mock request, reserve draft or obligation draft → human decision. The recorded human decision can be exported as a dossier (FR-011). A non-`available` source adds a blocked, downgraded or review branch (FR-008) and never an automatic request. The opted-in arrival case instead gathers and completes its source handoff before package intake as specified in the addendum.
 
 ## Acceptance Criteria
 
@@ -328,8 +344,16 @@ Verification values: **Automated** means a vitest, xUnit or CI check that fails 
 | FR-014 | AC-030 |
 | FR-015 | AC-031, AC-032, AC-033, AC-034, AC-035 |
 | FR-016 | AC-036, AC-037 |
+| FR-017 | AC-040, AC-041 |
+| FR-018 | AC-041, AC-042, AC-053, AC-055, AC-057, AC-059 |
+| FR-019 | AC-043, AC-044, AC-045, AC-046, AC-053, AC-059 |
+| FR-020 | AC-047, AC-048, AC-059 |
+| FR-021 | AC-049, AC-050, AC-051, AC-052, AC-057, AC-058, AC-060 |
+| FR-022 | AC-048, AC-049, AC-050, AC-051 |
+| FR-023 | AC-054 |
+| FR-024 | AC-056, AC-061 |
 
-Coverage: 15 of 15 FRs have at least one criterion (100%).
+Coverage: 23 of 23 FRs have at least one criterion (100%).
 
 ### FR-to-GOAL Alignment
 
@@ -337,11 +361,14 @@ Coverage: 15 of 15 FRs have at least one criterion (100%).
 |---|---|
 | FR-001 to FR-006, FR-009, FR-010 | GOAL-001 |
 | FR-007, FR-008 | GOAL-002 |
-| FR-011 to FR-016 | GOAL-003 |
+| FR-011, FR-012, FR-014 to FR-016 | GOAL-003 |
+| FR-017 to FR-024 | GOAL-001 |
 
 ## MVP and Release Framing
 
 The release contains FR-001 through FR-016, except the withdrawn FR-013. **Do not merge this PRD while its ARR prerequisites are undelivered.** Before approval, the product owner verifies default-branch code and passing behavior tests for ARR:FR-001, ARR:FR-002, ARR:FR-005, ARR:FR-006, ARR:FR-007, ARR:FR-008, ARR:FR-010 and ARR:DD-014, and CP:FR-001, CP:FR-002 and CP:FR-009. If CP is not yet delivered, stories for the Cases A to C fixtures wait for it and the ARR core case fixtures can proceed alone.
+
+The arrival addendum adds FR-017 through FR-024 to the opted-in release; its human merge and subsequent pipeline planning gate precede production work.
 
 Suggested story order (each story changes under 500 lines, names its test file, and leaves the tests failing on `main`):
 
@@ -371,6 +398,8 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 - Product owner reviews the source fixtures for synthetic-only content and fictional identifiers.
 - Product owner confirms a sample dossier is readable by someone outside the team and states its limitations.
 - Product owner confirms that no slide or screen wording claims compliance, clearance or validity (see FR-015).
+- Product owner records AC-055 keyboard, announcements, denied/disabled controls and 4.5:1 text-contrast review in both themes.
+- Product owner checks the AC-061 local rehearsal guide and records the result.
 
 ## Success Metrics
 
@@ -379,6 +408,7 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 | GOAL-001 | Automated criteria passing (AC-001 to AC-013, AC-019 to AC-022 and AC-038: 18); records without provenance; cross-case records returned | 0 of 18; not built | 18 of 18; 0; 0 | Test results at each release-candidate revision |
 | GOAL-002 | Mode-command criteria (AC-014 to AC-018 and AC-039: 6) passing; audit record per accepted mode change; automatic requests or acceptances caused by a source problem | 0 of 6; none; not built | 6 of 6; 1 per accepted change and none per replay or rejection; 0 | Test results and audit history |
 | GOAL-003 | Dossier, applicability, finance and specialist-flag criteria passing (AC-024 to AC-037 except the withdrawn AC-028 and AC-029: 12); screens or exports stating compliance, clearance, validity or profit | 0 of 12; not built | 12 of 12; 0 | Test results and manual wording check |
+| GOAL-001 | Fixture-only arrival handoff: source sets pinned, unauthorized source-port calls, external calls and model calls | Arrival scenario not built | 5 of 5 sets; 0 unauthorized source-port, external or model calls | Production-host fixture rehearsal and counting fakes at each release candidate |
 
 ## Risks and Assumptions
 
@@ -415,6 +445,149 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 | Specialist flag | A contracts record marking a topic (sanctions, Cape Town, GDPR) for specialist review; it never states clearance. |
 | Pin | A reference to an exact source record version held in an evidence basis. |
 
+## Arrival Source-Interaction Addendum
+
+**Scope and precedence.** This addendum applies only to the fresh, enrolled `case-001` owned by `presenter`. For that case it supersedes the original scope's UI exclusion, mode-only mutation statement, package-before-gather flow and usability exclusion. It does not alter legacy scenarios or introduce an ARR lifecycle state: `not_started`, `collecting` and `ready` are source-journey metadata. SRC DD-023, DD-024 and DD-026 remain canonical; this addendum does not widen their entitlements, limits or coverage.
+
+**Existing contract evidence.** The [source contract](../source-systems-contract.md) specifies the role matrix, summary, signed fixtures and `source-record-pins-v1`; the [read endpoint](../../backend/AirlineDemo.Api/SourceSystems/SourceReadEndpoints.cs), [admission store](../../backend/AirlineDemo.Api/SourceSystems/SourceReadAdmissionStore.cs), [source basis](../../backend/AirlineDemo.Api/Evidence/EvidenceIntake.cs) and [case store](../../backend/AirlineDemo.Api/Persistence/CaseStateStore.cs) define the current governed read, serialization and expected-revision operations.
+
+### Arrival decisions
+
+| ID | Decision |
+|---|---|
+| DD-029 | `Demo:ArrivalJourney` defaults to `false`. When `true`, enroll only presenter-owned `case-001` using expected revision `0`, committing its `arrival.enrolled` marker at resulting revision `1`; do not auto-gather or pre-pin it, including when normal demo seeding is enabled. A positive-revision case without the marker is legacy and is never retroactively enrolled. |
+| DD-030 | The presenter starts and completes arrival; authenticated reviewer sessions retrieve only DD-023-entitled sources. The five-panel UI uses the existing summary and a separate, human-triggered governed read for details. Status and summary are not proof of retrieval or completion. |
+| DD-031 | Successful retrieval atomically appends its exact source pins and one read audit through the case store's expected-revision commit. Completion checks all five valid retrieved sets, their exact pins and current modes in the same revision it commits, then freezes a basis version and digest. |
+| DD-032 | Direct list/get and arrival retrieval share read classification and DD-024 admission; the shared reader never commits. A direct caller owns one audit-only commit; a successful pinning retrieval owns one combined audit-and-basis commit, and a non-pinning read owns one audit-only commit. Arrival audit projection is role-filtered and never exposes raw basis content. |
+
+### Arrival requirements
+
+The plan-qualified identifiers in the second column are distinct from this PRD's local SRC identifiers.
+
+| SRC ID | Arrival plan ID | Requirement and outcome | Goal | Criteria |
+|---|---|---|---|---|
+| FR-017 | plan:FR-001 | A fresh opted-in case starts unpinned on the pool board as `Arrived` and remains in arrival until persisted completion; defaults and existing cases are unchanged. | GOAL-001 | AC-040, AC-041 |
+| FR-018 | plan:FR-002 | The presenter starts arrival; exactly five ordered panels show the existing summary's mode, `Simulated` label and server-derived coverage. | GOAL-001 | AC-041, AC-042, AC-053, AC-055, AC-057, AC-059 |
+| FR-019 | plan:FR-003 | Human-triggered authenticated retrieval and detail reads obey DD-023 case/role scope and DD-024 shared limits, with distinct outcomes and no client-supplied authority. | GOAL-001 | AC-043, AC-044, AC-045, AC-046, AC-053, AC-059 |
+| FR-020 | plan:FR-004 | Each new scoped arrival retrieval or direct source read records server actor, role, time, source and outcome, with permitted successful record references and no payload in activity. | GOAL-001 | AC-047, AC-048, AC-059 |
+| FR-021 | plan:FR-005 | All five available, nonempty retrieved sets are pinned before presenter completion; the server names missing sources and blocks intake until completion. | GOAL-001 | AC-049, AC-050, AC-051, AC-052, AC-057, AC-058, AC-060 |
+| FR-022 | plan:FR-006 | Pins, completion, replay and concurrent operations preserve exact immutable record identity, version, content and digest without losing pins or disclosing hidden identities. | GOAL-001 | AC-048, AC-049, AC-050, AC-051 |
+| FR-023 | plan:FR-007 | Maintenance task-card text is literal untrusted data and cannot become markup, instructions or actions. | GOAL-001 | AC-054 |
+| FR-024 | plan:FR-008 | A signed-fixture-only rehearsal ends at enabled intake/AI handoff with zero external or model calls; actual investigation is optional and requires its existing configured model. | GOAL-001 | AC-056, AC-061 |
+
+| SRC ID / category | Arrival plan ID | Requirement | Criteria |
+|---|---|---|---|
+| NFR-009 / Performance and capacity | plan:NFR-001 | Preserve DD-024's shared rolling admission, concurrency, record-count and deadline bounds in the precise scope below. | AC-045, AC-046 |
+| NFR-010 / Reliability and resilience | plan:NFR-002 | Preserve earlier basis bytes and digests, atomic expected-revision commits, exact replay and failure isolation across file and SQL-compatible stores. | AC-044, AC-049, AC-050, AC-051 |
+| NFR-011 / Security and compatibility | plan:NFR-003 | Preserve existing source summary, record and signed-fixture contracts and legacy case behavior; protect role-scoped activity and the server-side intake gate. | AC-040, AC-043, AC-047, AC-048, AC-052, AC-056, AC-058 |
+| NFR-012 / Usability and accessibility | plan:NFR-004 | Provide native keyboard-operable controls, accessible source headings and status/alert announcements in both existing themes; preserve 4.5:1 text contrast using established tokens and manual review. | AC-042, AC-053, AC-054, AC-055, AC-059 |
+
+### Role and disclosure matrix
+
+All rows assume an authenticated session unless stated otherwise. Base activity fields are source, role, server time and outcome; reviewer activity also includes the server-derived actor. Record references are `(sourceId, recordId, recordVersion)` only.
+
+| Role / scope | Summary and arrival status | Start / complete | Retrieve or view source records | Arrival source activity |
+|---|---|---|---|---|
+| `technical-reviewer`, in scope | All five summaries and status | 403 `forbidden` | `technical`, `maintenance`, `records` | Base fields and actor; references only for those three sources |
+| `finance-reviewer`, in scope | All five summaries and status | 403 `forbidden` | `technical`, `finance` | Base fields and actor; references only for those two sources |
+| `legal-reviewer`, in scope | All five summaries and status | 403 `forbidden` | `records`, `contracts` | Base fields and actor; references only for those two sources |
+| `presenter`, in scope | All five summaries and status | Allowed with anti-forgery token | None; 403 `forbidden` | Base fields only; no actor or record references |
+| `executive`, in scope | All five summaries and status | 403 `forbidden` | None; 403 `forbidden` | Base fields only; no actor or record references |
+| Unknown role, in scope | 403 `forbidden` | 403 `forbidden` | 403 `forbidden` | 403 `forbidden` |
+| Any role, missing or out-of-scope case | Bodyless 404 | Bodyless 404 | Bodyless 404; no source call | No case activity disclosed or appended |
+
+For enrolled cases, an in-scope role denied a particular source receives 403 `forbidden`, matching the existing read endpoint. This scoped clarification supersedes AC-038's nonexistent-resource wording for that denial; it does not change DD-023 authorization. Missing and out-of-scope cases remain bodyless 404. Summary detail fields `recordCount`, `pinnedInBasis` and `recordsInUse` appear only for sources that the role can read; presenter and executive receive mode, label and coverage only. DD-026 coverage is true only for `available` mode with at least one in-scope record, not because a source was retrieved or pinned.
+
+For the enrolled case, that per-source disclosure supersedes AC-019's statement that every reviewer sees details for all five. The existing source contract's exact success envelopes govern summary and record reads rather than the original table's omitted summary `coverage` or added records-envelope `mode`; existing APIs and legacy behavior do not change.
+
+The existing [compliance-evidence presenter exception](../source-systems-contract.md#case-evidence-projection) is unchanged and is not extended to arrival activity, source records or case-basis projections.
+
+### Arrival API, admission and failure contract
+
+For enrolled cases, `GET /api/v1/cases/{caseId}/arrival` returns status; `POST` to `/arrival/start`, `/arrival/sources/{sourceId}/retrieve` or `/arrival/complete` is case-scoped and anti-forgery protected. The POST paths extend the same `/api/v1/cases/{caseId}` prefix. The existing case projection gains `arrival` only for enrolled cases; legacy responses have no such field.
+
+Each command body contains exactly `commandId` (nonblank string, at most 64 characters) and `expectedRevision` (nonnegative signed 64-bit integer). No command accepts actor, role, extra fields or query parameters. Status also accepts no query parameters. Success is HTTP 200 with exactly the applicable fields:
+
+```text
+Status:    {contractVersion: 1, caseId, caseRevision, state, missingSources, canComplete}
+Command:   {contractVersion: 1, commandId, caseId, state, priorRevision, newRevision, auditEventId}
+Retrieval: {contractVersion: 1, commandId, caseId, sourceId, outcome, priorRevision, newRevision, auditEventId, recordRefs}
+recordRefs entry: {sourceId, recordId, recordVersion}
+```
+
+Status `state` is `not_started`, `collecting` or `ready`; command state is `collecting` or `ready`. `missingSources` is an array in `technical`, `maintenance`, `finance`, `records`, `contracts` order, computed from one case snapshot's valid retrievals, exact pins and current modes; `canComplete` is true only while collecting with none missing. After persisted completion, state stays `ready` and `missingSources` stays `[]`. Coverage is absent from status. Retrieval `outcome` is `pinned`, `empty`, `stale` or `conflicting`; its receipt contains metadata only. `recordRefs` contains successful in-scope returned identities and is `[]` for an empty result.
+
+`caseId`, `commandId`, `sourceId` and `auditEventId` are strings; revisions are nonnegative signed 64-bit integers; `recordVersion` is a positive integer; `canComplete` is boolean; and `recordRefs` is an array of the shown triples.
+
+Arrival errors contain exactly `{contractVersion: 1, error: {code}}`, except `arrival_sources_missing`, whose `error` also contains `missingSources`; bodyless 404 is the case-scope exception. Errors contain no records, payload, receipt or hidden identities. For direct source list/get on an enrolled case, the code-only error envelope in the existing source contract supersedes the original generic error-envelope row; mode and dossier responses are unchanged.
+
+| Input or state | Exact result |
+|---|---|
+| No session; scoped unknown or unauthorized role; missing anti-forgery token on an otherwise valid command | 401 `unauthenticated`; 403 `forbidden`; 403 `anti_forgery_failed`, respectively; no source call |
+| Missing, out-of-scope or non-enrolled case on an arrival route | Bodyless 404; no source call or case activity |
+| Unsupported route version; missing, extra, malformed or oversized command field; any query parameter | 400 `unsupported_contract_version` or 400 `invalid_request`, respectively; no source call |
+| An otherwise authorized scoped reviewer's arrival retrieval source is `Technical` or `other` | 422 `unknown_source`; no source call |
+| Retrieve or complete before start; new start while collecting; new start or retrieve after completion | 409 `arrival_not_started`; 409 `arrival_started`; 409 `arrival_completed`, respectively; no source call |
+| New command at a stale revision; command ID reused with changed command, source, actor, role or revision after normal authorization and anti-forgery checks | 409 `stale_revision`; 409 `command_id_conflict`, respectively; no new pins or completion |
+| Exact authorized successful-command replay | 200 and the original stored receipt; no new source read, pin, revision or audit |
+| Complete with `technical` and `finance` missing; complete with all five valid sets pinned | 409 `arrival_sources_missing` with `missingSources: ["technical", "finance"]`; 200 ready receipt, respectively |
+| New, unused complete command ID after completion | 200 and the original completion receipt; no mutation |
+| Available nonempty / available empty / stale / conflicting retrieval | 200 with `pinned` / `empty` / `stale` / `conflicting`, respectively; only `pinned` adds pins |
+| Unavailable / 101 records / deadline exceeded / exhausted rate or in-flight budget | 503 `source_unavailable` / 422 `source_record_limit` / 504 `source_read_timeout` / 429 `source_read_limit`; no partial records or pins |
+| Direct get for a nonexistent record / a source returns a record from another case | 404 `record_not_found` / 502 `source_case_mismatch`; no record or identity disclosed |
+| Invalid source envelope or pin, bad digest, or changed content under an already-pinned source ID, record ID and version | 503 `source_read_failed`; one failed-read audit without record identities, no partial records or pins |
+| Durable read-audit write fails | 503 `audit_write_failed`; no records or receipt, no partial pin or success event, and no retry of the source call |
+| Enrolled package submission before completion, with missing sources / with none missing | 409 `arrival_sources_missing` with the ordered list / 409 `arrival_not_completed`, respectively; no intake side effects |
+
+DD-024 counts admitted direct list/get and arrival retrieval calls together across sources: at most 20 per authenticated session and case in a rolling 60-second window, with timestamps exactly 60 seconds old expired; at most 2 in-flight per case across sessions. Admitted reads count even if empty or failed; unauthorized, invalid, replayed and admission-rejected requests do not consume a read. Each read has a 1-second deadline, at most 100 records and no pagination. A 21st rolling-window request, third in-flight read or 101st record is refused as above.
+
+### Atomicity, audit and handoff
+
+- Pin every validated record from an `available`, nonempty, non-stale, non-conflicting retrieval using the existing canonical source-record serialization and `source-record-pins-v1`: exact source ID, record ID, version, complete server-owned content and lowercase SHA-256 content digest. Apply the existing source-basis validator to every arrival basis regardless of audit action before commit. Merge other source pins; preserve every earlier basis version, content and digest byte-for-byte. Empty, unavailable, stale, conflicting, rejected, oversized or timed-out reads never satisfy arrival.
+- The server checks authorization and stored command receipt before a source read. An exact replay returns the original receipt even after completion; a changed fingerprint conflicts after normal authorization. A successful new retrieval performs one port call and one expected-revision commit containing both its validated new basis and one audit event. For this enrolled journey only, a new command appends one basis even when its retrieved set is identical; this explicitly overrides the no-new-basis rule in AC-009 and the source contract for that case, while exact command replay remains a no-op and legacy gathering is unchanged.
+- A source or case change between read and commit returns 409 `stale_revision`: the losing attempt adds no pins or completion and never overwrites an intervening winner. It appends one audit-only `stale_revision` event against refreshed state, without retrying the source read or pin; if that audit fails, return 503 `audit_write_failed`. Earlier basis versions and all independently committed pins and events remain unchanged.
+- Direct list/get and each new arrival retrieval in an enrolled case record one scoped read attempt, including denied, empty, unavailable, stale, conflicting, rate-limited and timed-out outcomes. The server derives actor, role, time and outcome; successful returned records contribute identities and versions only. Denied, empty and failed outcomes contain no record identities; no source payload or task-card text is stored in the audit detail. Exact receipt replays, missing sessions and missing or out-of-scope cases create no case activity.
+- Case HTTP projections for enrolled cases omit raw basis `content` from every basis version for every role. Source activity uses an explicit field allowlist, never raw audit detail; references are projected only for the current role's DD-023-entitled sources, and presenter and executive receive only the four base fields. For persisted assessment witnesses of the form `source:<sourceId>:<recordId>:v<recordVersion>`, omit entries for sources the role cannot read; apply the same entitlement to other structured source-reference fields. Internal records are not rewritten.
+- Presenter completion atomically checks the five retrievals, exact pins and current `available` modes against the expected revision and records `arrival.completed` referencing the complete immutable basis version and digest. Later source-mode changes cannot rewrite the completion snapshot; ARR still applies its existing live-mode policy to later assessments.
+- For enrolled cases, the existing `POST /api/cases/{caseId}/packages` checks persisted completion before parsing, package or basis writes, investigation admission or model resolution. After completion, intake carries the frozen source-pin snapshot into its next source basis without altering earlier basis history. Legacy package behavior is unchanged.
+- Source pins and arrival audit do not count as document intake or investigation. Intake is complete only on the existing `package-received` journey event; investigation is complete only on recorded investigation or agent events. After completion and before package submission, arrival is done, intake is current and investigation is upcoming.
+- The UI displays `Not permitted` without read actions or details for denied sources, distinguishes the contract outcomes, serializes retrieval actions, disables duplicate actions while pending and never auto-retries. The role-filtered activity trail displays only projected fields; case and fleet refresh after successful writes and authenticated persona switches without closing the open arrival case.
+
+### Arrival acceptance criteria
+
+All criteria are future verification requirements, not claims that the feature is delivered. Automated criteria use the production host or real UI path with fakes only at named edges.
+
+| ID | Given / When / Then | FRs | Verification |
+|---|---|---|---|
+| AC-040 | Given the opt-in and a presenter-owned revision-0 `case-001`, when startup enrolls it, then one `arrival.enrolled` marker advances revision 0 to 1 and a counting source port and basis store show zero pre-gather calls and zero pins; with opt-in false, seeding matches the baseline, and an unenrolled positive-revision case remains byte-for-byte unchanged. | FR-017 | Automated |
+| AC-041 | Given an enrolled case, when a presenter opens and starts it, then the pool shows `Arrived`, the case opens on arrival, status changes from `not_started` to `collecting` with one start event, and it remains in arrival until persisted completion. | FR-017, FR-018 | Automated |
+| AC-042 | Given an enrolled started case, when its summary is displayed, then exactly five panels appear in canonical order with the server's mode, `Simulated` and coverage, including `coverage: false` for an available empty source; no client infers coverage from mode or pins. | FR-018 | Automated |
+| AC-043 | Given every matrix role and each of the five sources, when status, start, complete, retrieval and direct list/get are exercised, then the exact matrix responses and fields apply; denied or out-of-scope requests make zero port calls, and no browser role value grants access. | FR-019 | Automated |
+| AC-044 | Given valid sessions and otherwise valid commands, when the listed malformed fields, source IDs, query parameters, anti-forgery and lifecycle cases are submitted, then the exact table statuses, codes, body shapes and zero-call conditions apply; an invalid envelope, invalid pin or changed content for an already-pinned identity and version returns 503 `source_read_failed`, one identity-free failed audit and no partial records or pins. | FR-019 | Automated |
+| AC-045 | Given a fake clock and shared admission store, when direct reads and retrievals are mixed, then 20 admitted calls succeed within one session/case window, the 21st returns 429, the oldest expires at 60 seconds, and a third simultaneous read for the case returns 429 across sessions; 100 records pass, 101 return 422, and a read reaching the 1-second deadline returns 504 without partial records. | FR-019 | Automated |
+| AC-046 | Given an available nonempty, available empty, unavailable, stale, conflicting, limited or timed-out source, when an entitled reviewer retrieves it, then the exact outcome or error in the contract table is returned, only the available nonempty set is pinned, and an empty set is never called unavailable. | FR-019 | Automated |
+| AC-047 | Given new scoped direct list/get and retrieval attempts, when each succeeds, is denied, is empty or fails, then exactly one server-attributed audit event records source, actor, role, time and outcome, with identities only for successfully returned records and no payload; exact replays and missing sessions or cases add none. An injected audit write failure returns 503 `audit_write_failed`, returns no records, retries no source call and adds no partial pins or success event. | FR-020 | Automated |
+| AC-048 | Given source activity, source-bearing assessment witnesses and every historical basis version, when each role reads the enrolled case projection, then its fields and references match the matrix, no basis `content` appears in the raw response, and no role can recover an unauthorized source identity or version from activity, basis or assessment references; the existing compliance-evidence exception is unchanged. | FR-020, FR-022 | Automated |
+| AC-049 | Given a successful available nonempty retrieval and prior pins from another source, when committed through both file and SQL-compatible store contracts, then one port call, one validated basis append and one audit event occur together, including for a new command with identical content; exact replay appends none. Every returned record's exact identity, version, serialized content and digest is pinned, other pins remain, and all prior basis bytes and digests are unchanged. | FR-021, FR-022 | Automated |
+| AC-050 | Given an intervening case or source change between retrieval and commit in each store contract, when the stale commit is attempted, then it returns 409 `stale_revision`, adds no losing pins or completion, preserves the winner and every earlier basis byte and digest, and adds only one failed-attempt audit; if that audit write also fails, it returns 503 `audit_write_failed` without an additional event. | FR-021, FR-022 | Automated |
+| AC-051 | Given all five valid sets and available current modes, when the presenter completes at the expected revision in each store contract, then one completion freezes the exact basis version and digest; exact replay returns the original receipt with zero new calls or writes, reusing an ID with a changed fingerprint returns 409 `command_id_conflict`, and a new unused completion ID returns the original receipt without mutation. Later mode changes do not rewrite the snapshot. | FR-021, FR-022 | Automated |
+| AC-052 | Given an enrolled case lacking completion, when the real package route is called, then it returns the specified missing-sources or not-completed error and counting parser, package store, basis store, investigation admission and model fakes all report zero calls; after completion, intake preserves frozen pins and prior basis history, while a legacy case follows its original path. | FR-021 | Automated |
+| AC-053 | Given a source panel and authenticated persona switch, when the UI mounts or the session or case changes, then it performs no automatic record list/get or retrieval, clears prior data and in-flight work, ignores late old-session results, and offers `View records` only for entitled sources as a separate user-triggered audited read. | FR-018, FR-019 | Automated |
+| AC-054 | Given a maintenance task card containing instruction-shaped or HTML-shaped text, when displayed, then it is labelled `Untrusted source data` and rendered as literal text with no markup, link, command, tool action, approval or automatic request. | FR-023 | Automated |
+| AC-055 | Given the arrival interface in each existing theme, when a person navigates by keyboard and inspects the source headings and status/alert announcements, then controls are operable, denied and disabled actions are clear, and text meets 4.5:1 contrast using established tokens. | FR-018 | Manual |
+| AC-056 | Given a fresh temporary case store, committed signed fixtures and real source ports, when authenticated presenter, technical, finance and legal sessions complete the five-source journey through the production host, then intake/AI handoff is enabled with 5 of 5 sets pinned and counting model and network edges report zero calls; no package is submitted and no AI result is claimed. | FR-024 | Automated |
+| AC-057 | Given a source status or summary failure, when the enrolled case is displayed, then it is shown as unavailable rather than ready, and browsing a later step does not enable intake or forward progression. | FR-018, FR-021 | Automated |
+| AC-058 | Given one enrolled case snapshot, when status and completion are requested with technical and finance missing, then status reports exactly those sources in canonical order, `canComplete: false` and no coverage field, and completion returns the same ordered list; after all five sets are valid, only presenter completion changes state to `ready`. | FR-021 | Automated |
+| AC-059 | Given each reviewer and presenter, when the real UI switches authenticated personas and reads or filters source activity, then the open case remains open, case and fleet refresh after the switch or a successful write, denied panels say `Not permitted`, outcomes remain distinct, hidden references never appear, and only one retrieval is pending with no automatic retry. | FR-018, FR-019, FR-020 | Automated |
+| AC-060 | Given a completed arrival with source pins but no package or investigation events, when the real journey model and UI load, then arrival is done, intake is current and investigation is upcoming; source pins and read audit alone never complete either later step. | FR-021 | Automated |
+| AC-061 | Given the real App and HTTP-edge responses, when presenter, technical, finance and legal personas walk the five sources, then the UI reaches enabled handoff without claiming an AI run. The local rehearsal guide `docs/demo/arriving-plane-source-journey.md` states the opt-in, fresh-store setup, presenter → technical → finance → legal → presenter order, one unavailable-source recovery, expected activity and pins, and the stop before package submission. | FR-024 | Automated and manual |
+
+### Delivery and risk boundary
+
+No separate source systems, real data, new infrastructure, package dependencies, agents, or changes to signed fixture contracts, manifests or signatures are in scope. The user-imposed no-dependency boundary is stricter than the repository's package-addition allowance; in-process stubs follow DD-001, synthetic-only data follow ARR:CON-001, and the no-new-role or lifecycle-state boundary is a confirmed feature constraint and follows DD-014. If committed fixture verification fails, stop and refer it to the release owner. A fixture-only rehearsal stops before package submission; an actual model-backed investigation is a separate optional continuation.
+
+The human merge is the PRD approval gate: **@wesback is the named reviewer, approver and merger, and that review, approval and merge are pending**. Only after that merge does the repository pipeline perform its quality, security and functional planning and create implementation stories; no production implementation is authorized by this draft.
+
 ## Sign-Off
 
 ### Approval Checklist
@@ -423,6 +596,7 @@ Fixture data lives under `backend/AirlineDemo.Api/Fixtures/sources/`; code under
 * Engineering Reviewer: Not approved.
 * Security and Privacy Reviewer: Not assigned; synthetic data only, advisory.
 * Legal/Compliance: Not assigned; synthetic data only.
+* Arrival addendum reviewer and merger: @wesback — review, approval and merge pending.
 
 Approval date: Not approved.
 
@@ -443,6 +617,6 @@ This document defines draft requirements for a fictional, synthetic demonstrator
 * Withdrawn in v0.4.0 and not reused: DD-018, FR-013, AC-028, AC-029.
 * Template Version: 1.0.0.
 * Canonical Template: `docs/templates/prd-template.md`.
-* Companion PRDs: [Aircraft Return Readiness](aircraft-return-readiness.md) (ARR, v0.7.0); [Aircraft Case Pack](aircraft-case-pack.md) (CP); [Aircraft Hangar 3D](aircraft-hangar-3d.md) (HG).
+* Companion PRDs: [Aircraft Return Readiness](aircraft-return-readiness.md) (ARR, v0.9.2); [Aircraft Case Pack](aircraft-case-pack.md) (CP, v0.3.1); [Aircraft Hangar 3D](aircraft-hangar-3d.md) (HG, v0.4.1).
 * License: CC-BY 4.0 (Microsoft HVE-Core).
 * Attribution: Microsoft HVE-Core Team.
