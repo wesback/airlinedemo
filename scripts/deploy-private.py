@@ -253,6 +253,7 @@ terraform -chdir=infra/terraform state list
             "privatelink.oms.opinsights.azure.com": ("monitor_executor", "oms"),
             "privatelink.ods.opinsights.azure.com": ("monitor_executor", "ods"),
             "privatelink.agentsvc.azure-automation.net": ("monitor_executor", "agentsvc"),
+            "azure-api.net": ("gateway_executor", None),
         }
         for zone in az("network", "private-dns", "zone", "list", "-g", self.app_rg):
             if zone["name"] not in zones:
@@ -267,7 +268,8 @@ terraform -chdir=infra/terraform state list
                     "-z", zone["name"], "-n", "deployment-executor",
                     "--virtual-network", executor, "--registration-enabled", "false", "-o", "none")
             resource, key = zones[zone["name"]]
-            resources[f'azurerm_private_dns_zone_virtual_network_link.{resource}["{key}"]'] = (
+            index = "[0]" if key is None else f'["{key}"]'
+            resources[f'azurerm_private_dns_zone_virtual_network_link.{resource}{index}'] = (
                 zone["id"] + "/virtualNetworkLinks/deployment-executor")
         endpoint = az("network", "private-endpoint", "show", "-g", self.app_rg, "-n", "pe-blob")
         nic = az("network", "nic", "show", "--ids", endpoint["networkInterfaces"][0]["id"])
@@ -606,7 +608,27 @@ terraform -chdir=infra/terraform show -no-color /var/lib/airlinedemo/application
         self.execute("terraform -chdir=infra/terraform apply /var/lib/airlinedemo/application.tfplan")
 
     def plan_destroy(self):
-        self.connect()
+        networks = az("network", "vnet", "list", "-g", self.app_rg)
+        if any(network["name"] == "vnet-demo" for network in networks):
+            self.connect()
+        else:
+            # A failed destroy can leave DNS ownership after its app network has gone.
+            bridge_path = self.directory / "bridge.json"
+            previous = json.loads(bridge_path.read_text())
+            existing = {resource["id"].lower() for resource in az("resource", "list", "-g", self.app_rg)}
+            previous["resources"] = {address: resource_id for address, resource_id in previous["resources"].items()
+                                     if resource_id.lower() in existing}
+            for zone in az("network", "private-dns", "zone", "list", "-g", self.app_rg):
+                for link in az("network", "private-dns", "link", "vnet", "list", "-g", self.app_rg, "-z", zone["name"]):
+                    if link["name"] != "deployment-executor":
+                        continue
+                    if link["virtualNetwork"]["id"].lower() != previous["executor"]["vnet_id"].lower():
+                        raise RuntimeError("Remaining DNS link targets an unexpected VNet; refusing to adopt it.")
+                    if zone["name"] == "azure-api.net":
+                        previous["resources"]['azurerm_private_dns_zone_virtual_network_link.gateway_executor[0]'] = link["id"]
+                    elif link["id"].lower() not in {value.lower() for value in previous["resources"].values()}:
+                        raise RuntimeError("Remaining DNS link has no recorded Terraform ownership; reconcile it before teardown.")
+            write_private(bridge_path, json.dumps(previous))
         bridge = base64.b64encode((self.directory / "bridge.json").read_bytes()).decode()
         self.execute(f"""terraform -chdir=infra/terraform init -input=false -reconfigure -backend-config="$BACKEND_CONFIG_FILE"
 backup="/var/lib/airlinedemo/state-before-destroy-$(date -u +%Y%m%dT%H%M%SZ).json"
