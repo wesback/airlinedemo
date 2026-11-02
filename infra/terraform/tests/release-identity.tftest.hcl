@@ -439,6 +439,8 @@ run "release_outputs_contain_no_secrets" {
       "GRANT INSERT ON OBJECT::dbo.copilot_proposals TO [id-airline-app];",
       "GRANT SELECT ON OBJECT::dbo.copilot_release_receipts TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.copilot_release_receipts TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.copilot_invocation_details TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.copilot_invocation_details TO [id-airline-app];",
       "GRANT SELECT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
       "GRANT UPDATE ON OBJECT::dbo.source_read_windows TO [id-airline-app];",

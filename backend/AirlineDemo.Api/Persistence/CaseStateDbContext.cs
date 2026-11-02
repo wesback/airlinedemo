@@ -163,6 +163,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<CopilotProposalRow> CopilotProposals => Set<CopilotProposalRow>();
     public DbSet<CopilotProposalStateRow> CopilotProposalStates => Set<CopilotProposalStateRow>();
     public DbSet<CopilotReleaseReceiptRow> CopilotReleaseReceipts => Set<CopilotReleaseReceiptRow>();
+    public DbSet<CopilotInvocationDetailRow> CopilotInvocationDetails => Set<CopilotInvocationDetailRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -226,6 +227,21 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.Outcome).HasMaxLength(16).IsRequired();
             e.Property(x => x.ResultCode).HasMaxLength(64);
             e.HasIndex(x => new { x.AuthorizedCaseRef, x.AtTicks }).HasDatabaseName("IX_copilot_invocations_case_at");
+        });
+
+        modelBuilder.Entity<CopilotInvocationDetailRow>(e =>
+        {
+            e.ToTable("copilot_invocation_details", "dbo");
+            e.HasKey(x => x.DetailId);
+            e.Property(x => x.Kind).HasMaxLength(32).IsRequired();
+            e.Property(x => x.SourceId).HasMaxLength(64);
+            e.Property(x => x.RecordId).HasMaxLength(64);
+            e.Property(x => x.ScreeningState).HasMaxLength(16);
+            e.Property(x => x.FlaggedFields).HasMaxLength(2200);
+            e.Property(x => x.Gate).HasMaxLength(32);
+            e.Property(x => x.GateResult).HasMaxLength(64);
+            e.Property(x => x.BlockerCodes).HasMaxLength(2200);
+            e.HasIndex(x => x.InvocationId).HasDatabaseName("IX_copilot_invocation_details_invocation");
         });
 
         modelBuilder.Entity<InvestigationTraceRow>(e =>

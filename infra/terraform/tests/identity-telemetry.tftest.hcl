@@ -324,6 +324,8 @@ run "source_read_windows_app_grant_is_exact" {
       "GRANT INSERT ON OBJECT::dbo.copilot_proposals TO [id-airline-app];",
       "GRANT SELECT ON OBJECT::dbo.copilot_release_receipts TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.copilot_release_receipts TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.copilot_invocation_details TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.copilot_invocation_details TO [id-airline-app];",
       "GRANT SELECT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
       "GRANT UPDATE ON OBJECT::dbo.source_read_windows TO [id-airline-app];",
@@ -418,7 +420,7 @@ run "M-14_app_role_scopes_are_exact_literals" {
   }
 
   assert {
-    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 39 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 41 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
     error_message = "App SQL grants on dbo must cover exactly the adapter tables, with append-only history access and no schema-wide grants."
   }
 }
