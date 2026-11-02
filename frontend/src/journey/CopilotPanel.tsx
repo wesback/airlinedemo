@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent } from 'react';
+import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session } from './api';
 import CopilotConfirmationCard from './CopilotConfirmation';
 import { copilotMessage, postCopilot, type CopilotAnswer, type CopilotQuestionBody, type CopilotRecord } from './copilotApi';
@@ -10,6 +10,26 @@ type Props = { session: Session; caseId: string | null };
 type Exchange = { scope: string; question: string; releaseNote: string; busy: boolean; error: string; answer: CopilotAnswer | null; sentNote: string; selected: string };
 
 const recordKey = (record: { sourceId: string; recordId: string; recordVersion: number }) => `${record.sourceId}\u0000${record.recordId}\u0000${record.recordVersion}`;
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+export const WARNING_CHIP = 'Untrusted instructions detected in a source record';
+
+/**
+ * Renders payload fields as a definition list of text. Flagged fields are looked up where the platform screens them:
+ * inside a `fields` object when the payload has one, otherwise at the top level. Values are never parsed as markup.
+ */
+function PayloadList({ value, flagged }: { value: Record<string, unknown>; flagged: ReadonlySet<string> }): ReactNode {
+  const screened = isObject(value.fields) ? value.fields : value;
+  const list = (entries: Record<string, unknown>, marks: ReadonlySet<string>) => <dl className="av-copilot-payload">
+    {Object.entries(entries).map(([name, item]) => <div key={name}>
+      <dt>{name}</dt>
+      <dd>{isObject(item) ? list(item, item === screened ? flagged : new Set())
+        : marks.has(name) ? <mark>{typeof item === 'string' ? item : JSON.stringify(item)}</mark>
+          : typeof item === 'string' ? item : JSON.stringify(item ?? null)}</dd>
+    </div>)}
+  </dl>;
+  return list(value, screened === value ? flagged : new Set());
+}
+
 const blank = (scope: string): Exchange => ({ scope, question: '', releaseNote: '', busy: false, error: '', answer: null, sentNote: '', selected: '' });
 
 /**
@@ -56,6 +76,8 @@ export default function CopilotPanel({ session, caseId }: Props) {
 
   const answer = current.answer;
   const available = new Set((answer?.records ?? []).map(recordKey));
+  const detected = (answer?.records ?? []).filter((record) => record.screening?.state === 'detected');
+  const unavailable = (answer?.records ?? []).some((record) => record.screening?.state === 'unavailable');
   const status = current.busy ? 'Asking the copilot…' : answer ? 'Answer received.' : '';
 
   return (
@@ -77,6 +99,17 @@ export default function CopilotPanel({ session, caseId }: Props) {
       {answer && <section className="av-copilot-answer" aria-labelledby={`${ids}-answer`}>
         <h3 id={`${ids}-answer`}>Answer</h3>
         <p className="av-copilot-text">{answer.answer}</p>
+        {(detected.length > 0 || unavailable) && <ul className="av-copilot-chips" aria-label="Screening">
+          {detected.map((record) => {
+            const key = recordKey(record);
+            return <li key={key}>
+              <button type="button" className="av-chip av-chip-warning" aria-pressed={current.selected === key} onClick={() => select(key)}>
+                {WARNING_CHIP}<span className="av-chip-detail">{`: ${record.sourceId} ${record.recordId} v${record.recordVersion}`}</span>
+              </button>
+            </li>;
+          })}
+          {unavailable && <li><span className="av-chip av-chip-neutral">Screening unavailable</span></li>}
+        </ul>}
         {answer.citations.length > 0 && <ul className="av-copilot-citations" aria-label="Citations">
           {answer.citations.map((citation) => {
             const key = recordKey(citation);
@@ -100,7 +133,10 @@ export default function CopilotPanel({ session, caseId }: Props) {
             className={`av-copilot-record${current.selected === key ? ' is-selected' : ''}`} aria-current={current.selected === key ? 'true' : undefined}
             ref={(element) => { if (element) records.current.set(key, element); else records.current.delete(key); }}>
             <p className="av-copilot-record-meta">{`${record.sourceId} · ${record.recordId} · v${record.recordVersion}${record.asOf ? ` · as of ${record.asOf}` : ''}${record.stale ? ' · stale' : ''}`}</p>
-            <pre>{JSON.stringify(record.payload ?? null, null, 2)}</pre>
+            {isObject(record.payload)
+              ? <PayloadList value={record.payload}
+                flagged={new Set(current.selected === key && record.screening?.state === 'detected' ? record.screening.flaggedFields : [])} />
+              : <dl className="av-copilot-payload"><div><dt>payload</dt><dd>{JSON.stringify(record.payload ?? null)}</dd></div></dl>}
           </article>;
         })}
       </section>}

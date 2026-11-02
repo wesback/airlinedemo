@@ -1,6 +1,7 @@
 export type CopilotCitation = { sourceId: string; recordId: string; recordVersion: number };
+export type CopilotScreening = { state: 'clear' | 'detected' | 'unavailable' | string; service?: string; flaggedFields: string[] };
 export type CopilotRecord = CopilotCitation & {
-  asOf?: string; caseId?: string; kind?: string; stale?: boolean; payload?: unknown; synthetic?: boolean;
+  asOf?: string; caseId?: string; kind?: string; stale?: boolean; payload?: unknown; synthetic?: boolean; screening?: CopilotScreening;
 };
 export type CopilotConfirmation = {
   contractVersion: number; proposalId: string; caseId: string; aircraftId: string; action: string; expectedRevision: number;
