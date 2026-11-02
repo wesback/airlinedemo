@@ -118,6 +118,13 @@ builder.Services.AddSingleton<Microsoft.Extensions.AI.IChatClient>(sp =>
         ?? throw new InvalidOperationException("No approved model manifest is configured; accepted evidence cannot be investigated.");
     return sp.GetRequiredService<Func<ApprovedModelManifest, Microsoft.Extensions.AI.IChatClient>>()(manifest);
 });
+// Record screening reuses the gateway audience and lazy credential on its own named client, apart from the model transport.
+builder.Services.AddHttpClient(CopilotRecordScreener.HttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan);
+builder.Services.AddSingleton<ICopilotRecordScreener>(sp => new CopilotRecordScreener(builder.Configuration,
+    new GatewayScopedTokenCredential(new LazyTokenCredential(sp.GetRequiredService<Func<Azure.Core.TokenCredential>>()),
+        ModelGatewayTokenomics.TokenScope(builder.Configuration["ModelGateway:Audience"])),
+    sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<TimeProvider>(),
+    sp.GetRequiredService<ILogger<CopilotRecordScreener>>()));
 Program.RegisterProductionEvaluationExecutors(builder.Services);
 builder.Services.AddSingleton(FinanceDemoData.CreateStore());
 // Source implementations are registered here; pinned fixtures are verified before the app accepts requests.
