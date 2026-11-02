@@ -1,3 +1,4 @@
+import type { CopilotActivityItem } from './copilotApi';
 import type { AuditEvent, CaseRecord } from './api';
 
 export type Actor = 'ai' | 'human' | 'rules';
@@ -202,6 +203,22 @@ export function actorName(actor: string): string {
 }
 
 export type ActivityItem = { key: string; actor: Actor; who: string; what: string; reason: string | null; at: string };
+
+export type TrailEntry =
+  | { origin: 'ui'; key: string; at: string; item: ActivityItem }
+  | { origin: 'copilot'; key: string; at: string; item: CopilotActivityItem };
+
+/** Business (UI) entries and copilot invocations in one timeline, newest first; equal times keep UI entries first. */
+export function mergeTrail(business: ActivityItem[], copilot: CopilotActivityItem[]): TrailEntry[] {
+  const entries: TrailEntry[] = [
+    ...business.map((item) => ({ origin: 'ui' as const, key: `ui-${item.key}`, at: item.at, item })),
+    ...[...copilot].reverse().map((item) => ({ origin: 'copilot' as const, key: `copilot-${item.invocationId}`, at: item.at, item })),
+  ];
+  const time = (iso: string) => { const value = Date.parse(iso); return Number.isNaN(value) ? 0 : value; };
+  return entries.map((entry, index) => ({ entry, index }))
+    .sort((a, b) => time(b.entry.at) - time(a.entry.at) || a.index - b.index)
+    .map(({ entry }) => entry);
+}
 
 const ROLE_NARRATION = new Set(['technical-reviewer', 'finance-reviewer', 'legal-reviewer']);
 
