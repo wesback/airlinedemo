@@ -270,7 +270,7 @@ Out of scope. The demonstrator is a fixed, in-process, four-case fixture set; NF
 
 ### Usability and Accessibility
 
-Not applicable to the original scope; display of the summary is a dashboard or HG requirement. The opted-in arrival interface is specified in the addendum.
+For the original summary-only dashboard, usability and accessibility remain outside the scope of this PRD section. The opted-in arrival interface uses the scoped non-functional requirement `NFR-012` in the Arrival requirements table: native keyboard-operable controls, accessible source headings and status/alert announcements in both existing themes, and 4.5:1 text contrast using established tokens. The manual check in `AC-055` verifies these targets; no whole-product accessibility conformance claim is made.
 
 ## Constraints
 
@@ -643,7 +643,7 @@ None requested.
 
 ### Handoff Readiness
 
-The arrival scope is Product Owner and Engineering Reviewer approved by @wesback on 2026-11-02. The correction PRD is merged, but the formal quality review still blocks on maintenance fixture signature verification; its Engineering Reviewer finding predates the approval recorded above. No production story begins until a fresh quality review passes and post-merge security and functional planning creates the implementation stories. The fixture rehearsal and full suite additionally require the release owner to restore signature verification. The pipeline plans a merged PRD (threat model, then stories); no additional ARR amendment AS-002 is needed first. The telemetry approval record (DD-025) remains a separate person-merged pull request; the stories adding its four attributes depend on it.
+The arrival scope is Product Owner and Engineering Reviewer approved by @wesback on 2026-11-02. The last formal quality review approved both exits with comments and identified two cautions; this revision clarifies the scoped `NFR-012` placement and separates the fixture dependency from PRD quality decisioning. A fresh formal review is pending. The maintenance signature mismatch is a separate delivery dependency that blocks fixture rehearsal and the full suite, not the PRD quality gate. No production story begins until this PRD update is human-merged and post-merge security and functional planning creates the implementation stories. The pipeline plans a merged PRD (threat model, then stories); no additional ARR amendment AS-002 is needed first. The telemetry approval record (DD-025) remains a separate person-merged pull request; the stories adding its four attributes depend on it.
 
 ## Disclaimer
 
