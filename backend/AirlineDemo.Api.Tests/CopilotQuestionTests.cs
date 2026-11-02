@@ -563,10 +563,11 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
                 foreach (var forbidden in new[] { "IGNORE PREVIOUS", "<script", "alert(1)", "]]>", "</tool>", "payload", "fields", "untrustedRecords", "uiOnly", "modelSafe", "asOf" })
                     Assert.DoesNotContain(forbidden, outbound, StringComparison.OrdinalIgnoreCase);
             }
+            // The technical list and the technical record read return the same record; the panel shows it once.
             var records = reply.Json["records"]!.AsArray();
-            Assert.Equal(4, records.Count);
-            Assert.All(records.Take(3), record => Assert.Equal(Hostile, (string?)record!["payload"]!["fields"]!["note"]));
-            Assert.Equal("""{"documentId":"","documentVersion":"","containsPersonalData":false}""", records[3]!["payload"]!.ToJsonString());
+            Assert.Equal(3, records.Count);
+            Assert.All(records.Take(2), record => Assert.Equal(Hostile, (string?)record!["payload"]!["fields"]!["note"]));
+            Assert.Equal("""{"documentId":"","documentVersion":"","containsPersonalData":false}""", records[2]!["payload"]!.ToJsonString());
             Assert.DoesNotContain("<script>", reply.Body, StringComparison.Ordinal);
             Assert.Contains("\\u003Cscript\\u003E", reply.Body, StringComparison.Ordinal);
         }

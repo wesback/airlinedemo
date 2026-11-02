@@ -110,6 +110,7 @@ public static class CopilotQuestions
         private readonly HashSet<string> _callIds = new(StringComparer.Ordinal);
         private static readonly JsonSerializerOptions EscapedJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default };
         private readonly JsonArray _records = [];
+        private readonly HashSet<string> _recordIdentities = new(StringComparer.Ordinal);
         // The source/record/version tuples read_source returned to this user in this turn: the only citable values.
         private readonly HashSet<CopilotSourceRef> _returned = [];
         private int _modelAttempts;
@@ -224,10 +225,17 @@ public static class CopilotQuestions
             _returned.UnionWith(CopilotInputContract.ReturnedRefs(observation));
             if (tool.Structured["untrustedRecords"] is JsonObject envelope)
             {
-                if (envelope["records"] is JsonArray list) foreach (var record in list) _records.Add(record?.DeepClone());
-                else _records.Add(envelope["record"]?.DeepClone());
+                if (envelope["records"] is JsonArray list) foreach (var record in list) AddRecord(record);
+                else AddRecord(envelope["record"]);
             }
             return (call.Name, retained, observation, null);
+        }
+
+        // A record read twice in one turn (a list, then the record) is shown once: one entry per source, record and version.
+        private void AddRecord(JsonNode? record)
+        {
+            var identity = $"{(string?)record?["sourceId"]}\n{(string?)record?["recordId"]}\n{(int?)record?["recordVersion"]}";
+            if (_recordIdentities.Add(identity)) _records.Add(record?.DeepClone());
         }
 
         // Duplicate or non-object argument JSON is refused by the tool; the raw OpenAI arguments are read when present.
