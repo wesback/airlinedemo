@@ -228,6 +228,42 @@ class PrivateDeploymentTests(unittest.TestCase):
             instance.connect()
         run.assert_not_called()
 
+    @patch.object(deployment, "az")
+    def test_partial_destroy_adopts_remaining_gateway_link_without_recreating_network(self, az):
+        instance = self.executor()
+        instance.app_rg = "rg-demo1"
+        instance.connect = Mock()
+        instance.execute = Mock()
+        executor = "/synthetic/executor"
+        link = {"name": "deployment-executor", "id": "/synthetic/gateway/link",
+                "virtualNetwork": {"id": executor}}
+        for zone, network, error in (
+            ("azure-api.net", executor, None),
+            ("azure-api.net", "/unrelated", "unexpected VNet"),
+            ("unrecorded.zone", executor, "no recorded Terraform ownership"),
+        ):
+            with self.subTest(zone=zone, network=network), tempfile.TemporaryDirectory() as directory:
+                instance.directory = Path(directory)
+                bridge_path = instance.directory / "bridge.json"
+                bridge_path.write_text(json.dumps({
+                    "executor": {"vnet_id": executor, "blob_dns_zone_id": "/synthetic/blob"},
+                    "resources": {"deleted-link": "/deleted"},
+                }))
+                link["virtualNetwork"]["id"] = network
+                az.side_effect = [[], [{"id": link["id"]}], [{"name": zone}], [link]]
+                instance.execute.reset_mock()
+                if error:
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        instance.plan_destroy()
+                    instance.execute.assert_not_called()
+                else:
+                    instance.plan_destroy()
+                    self.assertEqual({
+                        "azurerm_private_dns_zone_virtual_network_link.gateway_executor[0]": link["id"],
+                    }, json.loads(bridge_path.read_text())["resources"])
+                    instance.execute.assert_called_once()
+                instance.connect.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -248,6 +248,10 @@ policy-ignore route. The new SQL database and application state start clean.
 
 If destruction is interrupted, keep the executor and backend intact. Inspect
 the current state and Azure inventory before creating another destroy plan.
+Rerun `--stage plan-destroy`, review its remaining actions, then run
+`--stage destroy`. If the app VNet is already gone, planning does not recreate
+it: recorded surviving bridge links and the API Management DNS link are adopted
+for cleanup. Conflicting or unrecognized DNS ownership stops the script.
 Do not force-unlock unless the previous operation is confirmed stopped. Do not
 delete the state resource group to solve an application failure.
 

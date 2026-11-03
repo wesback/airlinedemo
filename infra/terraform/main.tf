@@ -414,13 +414,13 @@ resource "azurerm_network_security_perimeter" "deployer" {
 }
 
 resource "azurerm_network_security_perimeter_profile" "deployer" {
-  count                         = length(azurerm_network_security_perimeter.deployer)
+  count                         = length(var.deployer_ip_cidrs) > 0 ? 1 : 0
   name                          = "deployer"
   network_security_perimeter_id = azurerm_network_security_perimeter.deployer[0].id
 }
 
 resource "azurerm_network_security_perimeter_access_rule" "deployer" {
-  count                                 = length(azurerm_network_security_perimeter.deployer)
+  count                                 = length(var.deployer_ip_cidrs) > 0 ? 1 : 0
   name                                  = "deployer-ip"
   network_security_perimeter_profile_id = azurerm_network_security_perimeter_profile.deployer[0].id
   direction                             = "Inbound"
@@ -428,7 +428,7 @@ resource "azurerm_network_security_perimeter_access_rule" "deployer" {
 }
 
 resource "azurerm_network_security_perimeter_association" "key_vault" {
-  count                                 = length(azurerm_network_security_perimeter.deployer)
+  count                                 = length(var.deployer_ip_cidrs) > 0 ? 1 : 0
   name                                  = "key-vault"
   network_security_perimeter_profile_id = azurerm_network_security_perimeter_profile.deployer[0].id
   resource_id                           = azurerm_key_vault.kv.id
@@ -438,7 +438,7 @@ resource "azurerm_network_security_perimeter_association" "key_vault" {
 }
 
 resource "azurerm_network_security_perimeter_association" "content_safety" {
-  count                                 = length(azurerm_network_security_perimeter.deployer)
+  count                                 = length(var.deployer_ip_cidrs) > 0 ? 1 : 0
   name                                  = "content-safety"
   network_security_perimeter_profile_id = azurerm_network_security_perimeter_profile.deployer[0].id
   resource_id                           = azurerm_cognitive_account.content_safety.id
