@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "fixtureVersion": "1.0.0",
+  "approvalMechanism": "fixture-pr-merge",
+  "rowsFile": "inputs.jsonl",
+  "rowsSha256": "0b5896cbe978d6cbcff44864a06969b1a718cd1ad9444b5eef7543dfbcb79209",
+  "rowCount": 12,
+  "productionOutputs": "captured-by-private-harness-after-approval"
+}
