@@ -168,6 +168,13 @@ settings; this is not another Azure ID requested from the operator. Terraform
 rejects another workspace or an unverified suffix, reads the exact existing
 container, and retains container-only data grants. It never creates a substitute
 container or grants account-wide runtime Blob data access.
+
+An existing native Cosmos operator role can read back its scope with
+`/resourcegroups/` rather than `/resourceGroups/`. The Cosmos management grant
+normalizes only this path segment to retain the same exact account, role and
+principal without a casing-only replacement. Database-level data grants and
+private container scopes are unchanged; the saved-plan no-deletion guard remains enabled.
+
 When fresh rebuild settings exist, Foundry planning uses that variable/backend
 pair rather than the previous deployment's saved settings. Missing members of
 the fresh pair stop planning instead of mixing old and new inputs.

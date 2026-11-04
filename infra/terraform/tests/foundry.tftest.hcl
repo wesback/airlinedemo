@@ -417,7 +417,7 @@ run "foundry_runtime_grants_use_exact_project_generated_scopes" {
   assert {
     condition = (
       alltrue([for key, expected in {
-        cosmos_operator  = { scope = azurerm_cosmosdb_account.foundry[0].id, role = "Cosmos DB Operator" }
+        cosmos_operator  = { scope = "/subscriptions/00000000-0000-0000-0000-000000000000/resourcegroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry", role = "Cosmos DB Operator" }
         storage_operator = { scope = azurerm_storage_account.foundry[0].id, role = "Storage Account Contributor" }
         search_data      = { scope = azurerm_search_service.foundry[0].id, role = "Search Index Data Contributor" }
         search_operator  = { scope = azurerm_search_service.foundry[0].id, role = "Search Service Contributor" }

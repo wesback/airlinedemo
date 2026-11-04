@@ -27,7 +27,8 @@ locals {
     agent_files = var.foundry_agent_container_name == null ? "${local.foundry_workspace_id}-azureml-agent" : var.foundry_agent_container_name
   }
   foundry_runtime_grants = local.foundry_state_count == 0 ? {} : {
-    cosmos_operator  = { scope = azurerm_cosmosdb_account.foundry[0].id, role = "Cosmos DB Operator" }
+    # ARM retains this casing for an existing Cosmos extension-role scope.
+    cosmos_operator  = { scope = replace(azurerm_cosmosdb_account.foundry[0].id, "/\\/resourceGroups\\//", "/resourcegroups/"), role = "Cosmos DB Operator" }
     storage_operator = { scope = azurerm_storage_account.foundry[0].id, role = "Storage Account Contributor" }
     search_data      = { scope = azurerm_search_service.foundry[0].id, role = "Search Index Data Contributor" }
     search_operator  = { scope = azurerm_search_service.foundry[0].id, role = "Search Service Contributor" }
