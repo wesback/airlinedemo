@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import tempfile
@@ -16,6 +17,86 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("private_deployment", ROOT / "scripts/deploy-private.py")
 deployment = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(deployment)
+
+
+class FoundryRecoveryTests(unittest.TestCase):
+    scope = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo"
+    subnet_id = scope + "/providers/Microsoft.Network/virtualNetworks/vnet-demo/subnets/snet-foundry-agent"
+    association = "azurerm_subnet_network_security_group_association.foundry_agent[0]"
+
+    def test_price_read_retries_only_transient_transport_failures(self):
+        failures = [deployment.URLError(ConnectionResetError("reset")), TimeoutError("timeout")]
+        failures.extend(deployment.HTTPError("https://prices.azure.com", status, "unavailable", None, None)
+                        for status in (429, 500, 502, 503, 504))
+        for error in failures:
+            with self.subTest(error=error), patch.object(deployment, "urlopen", side_effect=[
+                    error, io.StringIO('{"Items": []}')]) as read, \
+                    patch.object(deployment.time, "sleep") as sleep:
+                self.assertEqual({"Items": []}, deployment.read_retail_price_page("https://prices.azure.com"))
+                self.assertEqual(2, read.call_count)
+                read.assert_called_with("https://prices.azure.com", timeout=30)
+                sleep.assert_called_once_with(1)
+
+    def test_price_read_stops_after_four_attempts(self):
+        error = deployment.URLError(ConnectionResetError("reset"))
+        with patch.object(deployment, "urlopen", side_effect=error) as read, \
+                patch.object(deployment.time, "sleep") as sleep:
+            with self.assertRaises(deployment.URLError):
+                deployment.read_retail_price_page("https://prices.azure.com")
+            self.assertEqual(4, read.call_count)
+            self.assertEqual([1, 2, 4], [call.args[0] for call in sleep.call_args_list])
+
+    def test_price_read_does_not_retry_denial_certificate_or_invalid_json(self):
+        for error in (deployment.HTTPError("https://prices.azure.com", 403, "denied", None, None),
+                      deployment.URLError(deployment.ssl.SSLCertVerificationError("untrusted"))):
+            with self.subTest(error=error), patch.object(deployment, "urlopen", side_effect=error) as read, \
+                    patch.object(deployment.time, "sleep") as sleep:
+                with self.assertRaises(type(error)):
+                    deployment.read_retail_price_page("https://prices.azure.com")
+                self.assertEqual(1, read.call_count)
+                sleep.assert_not_called()
+        with patch.object(deployment, "urlopen", return_value=io.StringIO("{")) as read, \
+                patch.object(deployment.time, "sleep") as sleep:
+            with self.assertRaises(json.JSONDecodeError):
+                deployment.read_retail_price_page("https://prices.azure.com")
+            self.assertEqual(1, read.call_count)
+            sleep.assert_not_called()
+
+    def state(self):
+        return {"values": {"root_module": {"resources": [
+            {"address": "azurerm_subnet.foundry_agent[0]", "values": {"id": self.subnet_id}}]}}}
+
+    def test_network_import_reuses_only_exact_existing_agent_subnet(self):
+        read = Mock(return_value={"id": self.subnet_id, "networkSecurityGroup": {
+            "id": self.scope + "/providers/Microsoft.Network/networkSecurityGroups/tenant-nsg"}})
+        self.assertEqual((self.association, self.subnet_id),
+                         deployment.foundry_network_import(self.state(), self.scope, read))
+        read.assert_called_once_with(self.subnet_id)
+        for state in ({}, {"values": {"root_module": {"resources": [{"address": self.association}]}}}):
+            read.reset_mock()
+            self.assertIsNone(deployment.foundry_network_import(state, self.scope, read))
+            read.assert_not_called()
+        read.return_value = {"id": self.subnet_id}
+        self.assertIsNone(deployment.foundry_network_import(self.state(), self.scope, read))
+
+    def test_network_import_rejects_foreign_subnet_readback_and_nsg_scope(self):
+        for changed in ("state", "readback", "nsg"):
+            with self.subTest(changed=changed):
+                state = self.state()
+                live = {"id": self.subnet_id, "networkSecurityGroup": {
+                    "id": self.scope + "/providers/Microsoft.Network/networkSecurityGroups/tenant-nsg"}}
+                if changed == "state":
+                    state["values"]["root_module"]["resources"][0]["values"]["id"] = self.subnet_id.replace(
+                        "/rg-demo/", "/rg-foreign/")
+                elif changed == "readback":
+                    live["id"] = self.subnet_id.replace("snet-foundry-agent", "another-subnet")
+                else:
+                    live["networkSecurityGroup"]["id"] = live["networkSecurityGroup"]["id"].replace(
+                        "/rg-demo/", "/rg-foreign/")
+                read = Mock(return_value=live)
+                with self.assertRaises(ValueError):
+                    deployment.foundry_network_import(state, self.scope, read)
+                self.assertEqual(0 if changed == "state" else 1, read.call_count)
 
 
 class PrivateDeploymentTests(unittest.TestCase):
@@ -688,8 +769,10 @@ class PrivateDeploymentTests(unittest.TestCase):
                     key: candidate[key] for key in ("quotaRequests", "usage", "meterSkus")}))
                 log = root / "terraform-calls"
                 binary = root / "terraform"
-                binary.write_text('#!/bin/sh\nprintf "%s|%s\\n" "$TFVARS_FILE" "$BACKEND_CONFIG_FILE" >> "$CALL_LOG"\n')
+                binary.write_text('#!/bin/sh\nprintf "%s|%s\\n" "$TFVARS_FILE" "$BACKEND_CONFIG_FILE" >> "$CALL_LOG"\n'
+                                  'if [ "$2" = show ]; then printf \'{"values":{"root_module":{"resources":[]}}}\'; fi\n')
                 binary.chmod(0o700)
+                (root / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
                 if scenario != "saved":
                     fresh = root / "fresh-settings"
                     fresh.mkdir()
@@ -704,6 +787,8 @@ class PrivateDeploymentTests(unittest.TestCase):
                                    cwd=root, check=True, capture_output=True,
                                    env={**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
                                         "TFVARS_FILE": "saved-vars", "BACKEND_CONFIG_FILE": "saved-backend",
+                                        "AZURE_SUBSCRIPTION_ID": "00000000-0000-0000-0000-000000000000",
+                                        "APP_RESOURCE_GROUP": "rg-demo",
                                         "CALL_LOG": str(log)})
                     raise RuntimeError("stop after exercising production plan commands")
 
@@ -715,7 +800,52 @@ class PrivateDeploymentTests(unittest.TestCase):
                 else:
                     expected = ("saved-vars|saved-backend" if scenario == "saved" else
                                 f"{root}/fresh-settings/deploy.tfvars.json|{root}/fresh-settings/backend.hcl")
-                    self.assertEqual([expected, expected], log.read_text().splitlines())
+                    self.assertEqual([expected, expected, expected], log.read_text().splitlines())
+
+    def test_foundry_plan_executes_repeat_safe_exact_network_state_import(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instance = self.foundry_executor(directory)
+            candidate, _, _, _, _ = self.foundry_cloud(instance)
+            deployment.write_private(instance.directory / "foundry-estimate-inputs.json", json.dumps({
+                key: candidate[key] for key in ("quotaRequests", "usage", "meterSkus")}))
+            instance.execute.side_effect = RuntimeError("stop before cloud execution")
+            with self.assertRaisesRegex(RuntimeError, "^foundry_preflight_refused$"):
+                instance.foundry_plan()
+            script = instance.execute.call_args.args[0].split("python3 - <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+            fixture = FoundryRecoveryTests()
+            state = fixture.state()
+            for scenario in ("existing", "managed", "foreign"):
+                with self.subTest(scenario=scenario):
+                    live = {"id": fixture.subnet_id, "networkSecurityGroup": {
+                        "id": fixture.scope + "/providers/Microsoft.Network/networkSecurityGroups/tenant-nsg"}}
+                    current = copy.deepcopy(state)
+                    if scenario == "managed":
+                        current["values"]["root_module"]["resources"].append({"address": fixture.association})
+                    if scenario == "foreign":
+                        live["networkSecurityGroup"]["id"] = live["networkSecurityGroup"]["id"].replace(
+                            "/rg-demo/", "/rg-foreign/")
+                    native = Mock(return_value=live)
+                    with patch.object(runpy, "run_path", return_value={
+                            "foundry_network_import": deployment.foundry_network_import, "az": native}), \
+                            patch.object(subprocess, "check_output", return_value=json.dumps(current).encode()), \
+                            patch.object(subprocess, "run") as imported, \
+                            patch.dict(os.environ, {"AZURE_SUBSCRIPTION_ID": fixture.scope.split("/")[2],
+                                                    "APP_RESOURCE_GROUP": "rg-demo", "TFVARS_FILE": "vars.json"}):
+                        if scenario == "foreign":
+                            with self.assertRaises(ValueError):
+                                exec(script, {})
+                        else:
+                            exec(script, {})
+                        if scenario == "existing":
+                            native.assert_called_once_with("network", "vnet", "subnet", "show",
+                                                           "--ids", fixture.subnet_id, private=True)
+                            imported.assert_called_once_with([
+                                "terraform", "-chdir=infra/terraform", "import", "-input=false",
+                                "-var-file=vars.json", fixture.association, fixture.subnet_id], check=True)
+                        else:
+                            imported.assert_not_called()
+                            if scenario == "managed":
+                                native.assert_not_called()
 
     def foundry_candidate(self):
         return {

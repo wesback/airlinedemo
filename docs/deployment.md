@@ -149,6 +149,13 @@ When fresh rebuild settings exist, Foundry planning uses that variable/backend
 pair rather than the previous deployment's saved settings. Missing members of
 the fresh pair stop planning instead of mixing old and new inputs.
 
+On partial-apply recovery, planning adopts an existing agent-subnet NSG
+association into Terraform state when both exact resource IDs belong to the
+deployment's resource group. This handles an NSG attached by tenant automation
+before the first association completed. Import does not change the live NSG;
+any subsequent association change remains visible in the complete saved plan.
+Foreign subnet readback or NSG scope stops reconciliation.
+
 The provisioning identity can be an Entra user or service principal; Azure
 resolves its principal type for the two scoped store-provisioning grants.
 Available Search quota does not guarantee regional provisioning capacity. If
@@ -156,6 +163,9 @@ Search returns `InsufficientResourcesAvailable`, retain the partial Terraform
 state and replan after checking availability for the selected same-region tier.
 Refresh the exact tier's quota and price evidence; do not silently change region,
 open public access or delete the stores that were already created.
+Retail Prices reads use at most four attempts for transient connection failures
+and HTTP 429/500/502/503/504 responses. Denials, certificate failures
+and malformed JSON are not retried or replaced with cached evidence.
 
 For a retained build runner, set the optional
 `build_runner_os_disk_storage_account_type` to its actual OS disk SKU in the

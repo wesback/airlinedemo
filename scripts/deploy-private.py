@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -20,6 +21,7 @@ import time
 import uuid
 import zlib
 from urllib.parse import urlencode, urlparse
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +58,44 @@ def canonical_sha256(value):
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def read_retail_price_page(url):
+    for attempt in range(4):
+        try:
+            with urlopen(url, timeout=30) as response:
+                return json.load(response)
+        except HTTPError as error:
+            if error.code not in (429, 500, 502, 503, 504) or attempt == 3:
+                raise
+        except (URLError, TimeoutError, ConnectionError) as error:
+            if isinstance(getattr(error, "reason", error), ssl.SSLError) or attempt == 3:
+                raise
+        time.sleep(2 ** attempt)
+
+
+def foundry_network_import(state, scope, read_subnet):
+    address = "azurerm_subnet_network_security_group_association.foundry_agent[0]"
+    resources = state.get("values", {}).get("root_module", {}).get("resources", [])
+    if any(resource["address"] == address for resource in resources):
+        return None
+    subnets = [resource for resource in resources if resource["address"] == "azurerm_subnet.foundry_agent[0]"]
+    if not subnets:
+        return None
+    require_evidence(len(subnets) == 1)
+    subnet_id = subnets[0]["values"]["id"]
+    require_evidence(re.fullmatch(
+        re.escape(scope) + r"/providers/Microsoft\.Network/virtualNetworks/[^/]+/subnets/snet-foundry-agent",
+        subnet_id, flags=re.IGNORECASE) is not None)
+    subnet = read_subnet(subnet_id)
+    require_evidence(subnet["id"].lower() == subnet_id.lower())
+    group = subnet.get("networkSecurityGroup")
+    if group is None:
+        return None
+    require_evidence(re.fullmatch(
+        re.escape(scope) + r"/providers/Microsoft\.Network/networkSecurityGroups/[^/]+",
+        group["id"], flags=re.IGNORECASE) is not None)
+    return address, subnet_id
 
 
 def evidence_time(value):
@@ -248,6 +288,17 @@ if [ -d "$PWD/fresh-settings" ]; then
   test -r "$BACKEND_CONFIG_FILE"
 fi
 terraform -chdir=infra/terraform init -input=false -reconfigure -backend-config="$BACKEND_CONFIG_FILE" > /var/lib/airlinedemo/foundry-plan.log 2>&1
+python3 - <<'PY'
+import json, os, runpy, subprocess
+helpers = runpy.run_path("scripts/deploy-private.py")
+state = json.loads(subprocess.check_output(["terraform", "-chdir=infra/terraform", "show", "-json"]))
+scope = f"/subscriptions/{os.environ['AZURE_SUBSCRIPTION_ID']}/resourceGroups/{os.environ['APP_RESOURCE_GROUP']}"
+adoption = helpers["foundry_network_import"](state, scope, lambda resource_id:
+    helpers["az"]("network", "vnet", "subnet", "show", "--ids", resource_id, private=True))
+if adoption is not None:
+    subprocess.run(["terraform", "-chdir=infra/terraform", "import", "-input=false",
+                    "-var-file=" + os.environ["TFVARS_FILE"], *adoption], check=True)
+PY
 terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out=/var/lib/airlinedemo/foundry.tfplan >> /var/lib/airlinedemo/foundry-plan.log 2>&1
 """)
             projection = self.foundry_plan_evidence(candidate=True)
@@ -427,8 +478,7 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
                 require_evidence(parsed.scheme == "https" and parsed.netloc == "prices.azure.com"
                                  and parsed.path == "/api/retail/prices" and url not in seen)
                 seen.add(url)
-                with urlopen(url, timeout=30) as response:
-                    page = json.load(response)
+                page = read_retail_price_page(url)
                 sources.append(page)
                 rows.extend(row for row in page["Items"] if row["meterId"] == meter_id
                             and row["armRegionName"] == region and row["currencyCode"] == "USD"
