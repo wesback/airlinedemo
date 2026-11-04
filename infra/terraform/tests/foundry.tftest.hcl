@@ -1069,37 +1069,37 @@ run "foundry_rejects_missing_state_profile" {
 }
 
 run "foundry_search_in_germany_retains_swedish_private_topology" {
-    command = plan
-    variables {
-      foundry_enabled = true
-      foundry_state_profile = {
-        cosmos_total_throughput_limit  = 5000
-        cosmos_backup_interval_minutes = 240
-        cosmos_backup_retention_hours  = 8
-        cosmos_consistency_level       = "Session"
-        search_sku                     = "standard"
-        search_partitions              = 1
-        search_replicas                = 1
-        search_location                = "germanywestcentral"
-        storage_replication_type       = "LRS"
-        blob_retention_days            = 7
-        container_retention_days       = 7
-      }
-    }
-    assert {
-      condition = (
-        azurerm_search_service.foundry[0].location == "germanywestcentral" &&
-        azurerm_search_service.foundry[0].sku == "standard" &&
-        azurerm_search_service.foundry[0].public_network_access_enabled == false &&
-        azurerm_search_service.foundry[0].local_authentication_enabled == false &&
-        azurerm_private_endpoint.foundry_state["search"].location == "swedencentral" &&
-        azurerm_cosmosdb_account.foundry[0].location == "swedencentral" &&
-        azurerm_storage_account.foundry[0].location == "swedencentral" &&
-        local.foundry_template.resources[0].location == "swedencentral"
-      )
-      error_message = "Only Search relocates; Swedish Foundry and private access remain unchanged."
+  command = plan
+  variables {
+    foundry_enabled = true
+    foundry_state_profile = {
+      cosmos_total_throughput_limit  = 5000
+      cosmos_backup_interval_minutes = 240
+      cosmos_backup_retention_hours  = 8
+      cosmos_consistency_level       = "Session"
+      search_sku                     = "standard"
+      search_partitions              = 1
+      search_replicas                = 1
+      search_location                = "germanywestcentral"
+      storage_replication_type       = "LRS"
+      blob_retention_days            = 7
+      container_retention_days       = 7
     }
   }
+  assert {
+    condition = (
+      azurerm_search_service.foundry[0].location == "germanywestcentral" &&
+      azurerm_search_service.foundry[0].sku == "standard" &&
+      azurerm_search_service.foundry[0].public_network_access_enabled == false &&
+      azurerm_search_service.foundry[0].local_authentication_enabled == false &&
+      azurerm_private_endpoint.foundry_state["search"].location == "swedencentral" &&
+      azurerm_cosmosdb_account.foundry[0].location == "swedencentral" &&
+      azurerm_storage_account.foundry[0].location == "swedencentral" &&
+      local.foundry_template.resources[0].location == "swedencentral"
+    )
+    error_message = "Only Search relocates; Swedish Foundry and private access remain unchanged."
+  }
+}
 
 run "foundry_rejects_unbounded_cosmos_capacity" {
   command = plan
