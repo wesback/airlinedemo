@@ -9,7 +9,7 @@ public sealed class ReleaseIdentityContractTests
 {
     private static readonly Regex RoleAssignmentName = new(@"(?m)^resource\s+""azurerm_role_assignment""\s+""(\w+)""");
     private static readonly Regex OutputName = new(@"(?m)^output\s+""(\w+)""");
-    private static readonly Regex ModuleBlock = new(@"(?m)^\s*module\s+""");
+    private static readonly Regex ModuleName = new(@"(?m)^\s*module\s+""(\w+)""");
 
     // RELEASE-ID-01 and RELEASE-ID-06: a new, renamed or second grant (including a second one for the app identity on the ACR)
     // fails until this list is changed on purpose. app_acr_pull is the app identity's only ACR grant; the Terraform test
@@ -56,7 +56,10 @@ public sealed class ReleaseIdentityContractTests
             },
             names);
 
-        Assert.DoesNotContain(files, f => ModuleBlock.IsMatch(f.Text));
+        Assert.Equal(
+            new[] { "foundry_store_readback" },
+            files.SelectMany(f => ModuleName.Matches(f.Text).Select(m => m.Groups[1].Value))
+                .OrderBy(n => n, StringComparer.Ordinal).ToArray());
     }
 
     // RELEASE-ID-04: the set of outputs cannot grow unnoticed. The Terraform test release_outputs_contain_no_secrets asserts the
@@ -78,6 +81,7 @@ public sealed class ReleaseIdentityContractTests
                 "gateway_audience",
                 "migration_sql_grant_statements",
                 "model_endpoint",
+                "scopes",
             },
             names);
     }
