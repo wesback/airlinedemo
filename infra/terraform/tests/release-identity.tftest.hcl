@@ -1,4 +1,5 @@
 mock_provider "azuread" {
+  override_during = plan
   mock_data "azuread_client_config" {
     defaults = {
       object_id = "00000000-0000-0000-0000-0000000000d0"
@@ -17,6 +18,7 @@ mock_provider "azuread" {
   }
 }
 mock_provider "azurerm" {
+  override_during = plan
   mock_resource "azurerm_user_assigned_identity" {
     defaults = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-mock"
@@ -186,17 +188,19 @@ variables {
 }
 
 run "registry_is_private_and_pull_scoped" {
-  command = apply
+  command = plan
 
   override_resource {
-    target = azurerm_container_registry.acr
+    target          = azurerm_container_registry.acr
+    override_during = plan
     values = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ContainerRegistry/registries/acrdemotest"
     }
   }
 
   override_resource {
-    target = azurerm_user_assigned_identity.app
+    target          = azurerm_user_assigned_identity.app
+    override_during = plan
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-app"
       principal_id = "aBcDeF01-2345-6789-abcd-EF0123456789"
@@ -241,10 +245,11 @@ run "registry_is_private_and_pull_scoped" {
 }
 
 run "federation_is_limited_to_trusted_workflows" {
-  command = apply
+  command = plan
 
   override_resource {
-    target = azurerm_user_assigned_identity.build
+    target          = azurerm_user_assigned_identity.build
+    override_during = plan
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-build"
       principal_id = "66666666-6666-6666-6666-666666666666"
@@ -253,7 +258,8 @@ run "federation_is_limited_to_trusted_workflows" {
   }
 
   override_resource {
-    target = azurerm_user_assigned_identity.release
+    target          = azurerm_user_assigned_identity.release
+    override_during = plan
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-release"
       principal_id = "77777777-7777-7777-7777-777777777777"
@@ -284,10 +290,11 @@ run "federation_is_limited_to_trusted_workflows" {
 }
 
 run "signing_rights_are_resource_scoped" {
-  command = apply
+  command = plan
 
   override_resource {
-    target = azurerm_key_vault_certificate.signing
+    target          = azurerm_key_vault_certificate.signing
+    override_during = plan
     values = {
       resource_manager_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/certificates/release-image-signing-certificate/versions/0000"
       resource_manager_versionless_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test/certificates/release-image-signing-certificate"
@@ -295,28 +302,32 @@ run "signing_rights_are_resource_scoped" {
   }
 
   override_resource {
-    target = azurerm_container_registry.acr
+    target          = azurerm_container_registry.acr
+    override_during = plan
     values = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ContainerRegistry/registries/acrdemotest"
     }
   }
 
   override_resource {
-    target = azurerm_key_vault.kv
+    target          = azurerm_key_vault.kv
+    override_during = plan
     values = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.KeyVault/vaults/kv-demo-test"
     }
   }
 
   override_resource {
-    target = azurerm_container_app.app[0]
+    target          = azurerm_container_app.app[0]
+    override_during = plan
     values = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-demo-test"
     }
   }
 
   override_resource {
-    target = azurerm_user_assigned_identity.build
+    target          = azurerm_user_assigned_identity.build
+    override_during = plan
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-build"
       principal_id = "66666666-6666-6666-6666-666666666666"
@@ -324,7 +335,8 @@ run "signing_rights_are_resource_scoped" {
   }
 
   override_resource {
-    target = azurerm_user_assigned_identity.release
+    target          = azurerm_user_assigned_identity.release
+    override_during = plan
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-release"
       principal_id = "77777777-7777-7777-7777-777777777777"
@@ -385,10 +397,11 @@ run "signing_rights_are_resource_scoped" {
 }
 
 run "release_outputs_contain_no_secrets" {
-  command = apply
+  command = plan
 
   override_resource {
-    target = azurerm_user_assigned_identity.build
+    target          = azurerm_user_assigned_identity.build
+    override_during = plan
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-build"
       principal_id = "66666666-6666-6666-6666-666666666666"
@@ -397,7 +410,8 @@ run "release_outputs_contain_no_secrets" {
   }
 
   override_resource {
-    target = azurerm_user_assigned_identity.release
+    target          = azurerm_user_assigned_identity.release
+    override_during = plan
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-release"
       principal_id = "77777777-7777-7777-7777-777777777777"
@@ -431,6 +445,9 @@ run "release_outputs_contain_no_secrets" {
       "GRANT SELECT ON OBJECT::dbo.copilot_proposal_states TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.copilot_proposal_states TO [id-airline-app];",
       "GRANT UPDATE ON OBJECT::dbo.copilot_proposal_states TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.managed_conversations TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.managed_conversations TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.managed_conversations TO [id-airline-app];",
       "GRANT SELECT ON OBJECT::dbo.investigation_traces TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.investigation_traces TO [id-airline-app];",
       "GRANT SELECT ON OBJECT::dbo.investigation_trace_steps TO [id-airline-app];",
@@ -487,10 +504,11 @@ run "release_outputs_contain_no_secrets" {
 }
 
 run "federated_identities_are_distinct_principals" {
-  command = apply
+  command = plan
 
   override_resource {
-    target = azurerm_user_assigned_identity.build
+    target          = azurerm_user_assigned_identity.build
+    override_during = plan
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-build"
       principal_id = "66666666-6666-6666-6666-666666666666"
@@ -498,7 +516,8 @@ run "federated_identities_are_distinct_principals" {
   }
 
   override_resource {
-    target = azurerm_user_assigned_identity.release
+    target          = azurerm_user_assigned_identity.release
+    override_during = plan
     values = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-airline-release"
       principal_id = "77777777-7777-7777-7777-777777777777"

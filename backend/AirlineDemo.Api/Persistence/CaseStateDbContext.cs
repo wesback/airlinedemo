@@ -164,6 +164,7 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
     public DbSet<CopilotProposalStateRow> CopilotProposalStates => Set<CopilotProposalStateRow>();
     public DbSet<CopilotReleaseReceiptRow> CopilotReleaseReceipts => Set<CopilotReleaseReceiptRow>();
     public DbSet<CopilotInvocationDetailRow> CopilotInvocationDetails => Set<CopilotInvocationDetailRow>();
+    public DbSet<ManagedConversationRow> ManagedConversations => Set<ManagedConversationRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -242,6 +243,41 @@ public sealed class CaseStateDbContext(DbContextOptions<CaseStateDbContext> opti
             e.Property(x => x.GateResult).HasMaxLength(64);
             e.Property(x => x.BlockerCodes).HasMaxLength(2200);
             e.HasIndex(x => x.InvocationId).HasDatabaseName("IX_copilot_invocation_details_invocation");
+        });
+
+        modelBuilder.Entity<ManagedConversationRow>(e =>
+        {
+            e.ToTable("managed_conversations", "dbo");
+            e.HasKey(x => x.Handle);
+            e.Property(x => x.Handle).HasMaxLength(43).IsRequired();
+            e.Property(x => x.UserId).HasMaxLength(256).IsRequired();
+            e.Property(x => x.Role).HasMaxLength(64).IsRequired();
+            e.Property(x => x.CaseId).HasMaxLength(128).IsRequired();
+            e.Property(x => x.EntitlementFingerprint).HasMaxLength(128).IsRequired();
+            e.Property(x => x.AgentName).HasMaxLength(128).IsRequired();
+            e.Property(x => x.AgentVersion).HasMaxLength(128).IsRequired();
+            e.Property(x => x.ConfigurationDigest).HasMaxLength(128).IsRequired();
+            e.Property(x => x.EvidenceVersion).HasMaxLength(128);
+            e.Property(x => x.EvidenceHashesDigest).HasMaxLength(128);
+            e.Property(x => x.AttemptId).HasMaxLength(32).IsRequired();
+            e.Property(x => x.RemoteConversationId).HasMaxLength(512);
+            e.Property(x => x.ActiveFence).HasMaxLength(32);
+            e.Property(x => x.LastResponseId).HasMaxLength(512);
+            e.Property(x => x.ResponseItemIdsJson).IsRequired();
+            e.Property(x => x.ResultDigest).HasMaxLength(128);
+            e.Property(x => x.CleanupClaimToken).HasMaxLength(32);
+            e.Property(x => x.CleanupDeletedItemIdsJson).IsRequired();
+            e.Property(x => x.CleanupDeletedResponseIdsJson).IsRequired();
+            e.Property(x => x.Status).HasMaxLength(16).IsRequired();
+            e.HasIndex(x => x.RemoteConversationId).IsUnique()
+                .HasFilter("[RemoteConversationId] IS NOT NULL")
+                .HasDatabaseName("UX_managed_conversations_remote_id");
+            e.HasIndex(x => x.AttemptId).IsUnique().HasDatabaseName("UX_managed_conversations_attempt");
+            e.HasIndex(x => x.ActiveFence).IsUnique()
+                .HasFilter("[ActiveFence] IS NOT NULL")
+                .HasDatabaseName("UX_managed_conversations_active_fence");
+            e.HasIndex(x => new { x.Status, x.ExpiresAtTicks, x.CleanupConfirmedAtTicks })
+                .HasDatabaseName("IX_managed_conversations_cleanup");
         });
 
         modelBuilder.Entity<InvestigationTraceRow>(e =>

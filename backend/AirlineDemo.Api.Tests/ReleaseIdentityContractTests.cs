@@ -35,6 +35,11 @@ public sealed class ReleaseIdentityContractTests
                 "app_telemetry",
                 "build_acr_push",
                 "build_runner_token_secret",
+                "foundry_gateway",
+                "foundry_operator",
+                "foundry_provisioner_blob",
+                "foundry_provisioner_cosmos",
+                "foundry_runtime",
                 "gateway_cognitive_services",
                 "gateway_content_safety",
                 "migration_sql",
@@ -55,7 +60,7 @@ public sealed class ReleaseIdentityContractTests
     }
 
     // RELEASE-ID-04: the set of outputs cannot grow unnoticed. The Terraform test release_outputs_contain_no_secrets asserts the
-    // evaluated values of these three outputs.
+    // evaluated release output values; foundry.tftest.hcl covers the private runtime and publisher outputs.
     [Fact]
     public void Outputs_are_held_to_a_baseline()
     {
@@ -68,6 +73,8 @@ public sealed class ReleaseIdentityContractTests
             new[]
             {
                 "app_sql_grant_statements",
+                "foundry_agent_setup",
+                "foundry_gateway_endpoint",
                 "gateway_audience",
                 "migration_sql_grant_statements",
                 "model_endpoint",
@@ -111,7 +118,7 @@ public sealed class ReleaseIdentityContractTests
         var inputPrincipal = Regex.Match(testFile, @"(?m)^\s*terraform_principal_object_id\s*=\s*""([^""]+)""").Groups[1].Value;
         var workflowPrincipals = Regex.Matches(
                 testFile,
-                @"target\s*=\s*azurerm_user_assigned_identity\.(build|release)\s*values\s*=\s*\{[^}]*?principal_id\s*=\s*""([^""]+)""",
+                @"target\s*=\s*azurerm_user_assigned_identity\.(build|release)\s*(?:override_during\s*=\s*plan\s*)?values\s*=\s*\{[^}]*?principal_id\s*=\s*""([^""]+)""",
                 RegexOptions.Singleline)
             .Select(m => m.Groups[2].Value)
             .ToArray();

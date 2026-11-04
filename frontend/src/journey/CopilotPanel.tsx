@@ -1,13 +1,20 @@
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session } from './api';
 import CopilotConfirmationCard from './CopilotConfirmation';
-import { copilotMessage, postCopilot, type CopilotAnswer, type CopilotQuestionBody, type CopilotRecord } from './copilotApi';
+import {
+  copilotMessage, getCopilotConversation, postCopilot, type CopilotAnswer, type CopilotHistoryTurn,
+  type CopilotQuestionBody, type CopilotRecord,
+} from './copilotApi';
 
-export const COPILOT_NOTICE = 'Synthetic demo only. Do not enter personal, confidential, live aircraft or customer data. Your question is sent to the governed model.';
+export const COPILOT_NOTICE = 'Synthetic demo only. Do not enter personal, confidential, live aircraft or customer data. Your question is sent to the governed model. Conversation history is service-managed; this page does not persist transcripts in browser storage.';
 const MAX_QUESTION = 2000;
 
 type Props = { session: Session; caseId: string | null };
-type Exchange = { scope: string; question: string; releaseNote: string; busy: boolean; error: string; answer: CopilotAnswer | null; sentNote: string; selected: string };
+type Exchange = {
+  scope: string; question: string; releaseNote: string; busy: boolean; busyLabel: string; error: string;
+  answer: CopilotAnswer | null; sentNote: string; selected: string; resumeHandle: string;
+  conversationHandle: string | null; history: CopilotHistoryTurn[]; statusMessage: string;
+};
 
 const recordKey = (record: { sourceId: string; recordId: string; recordVersion: number }) => `${record.sourceId}\u0000${record.recordId}\u0000${record.recordVersion}`;
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -30,14 +37,21 @@ function PayloadList({ value, flagged }: { value: Record<string, unknown>; flagg
   return list(value, screened === value ? flagged : new Set());
 }
 
-const blank = (scope: string): Exchange => ({ scope, question: '', releaseNote: '', busy: false, error: '', answer: null, sentNote: '', selected: '' });
+const blank = (scope: string): Exchange => ({
+  scope, question: '', releaseNote: '', busy: false, busyLabel: '', error: '', answer: null, sentNote: '',
+  selected: '', resumeHandle: '', conversationHandle: null, history: [], statusMessage: '',
+});
+const terminalConversationErrors = new Set([
+  'conversation_expired', 'conversation_context_mismatch', 'conversation_turn_limit', 'conversation_unavailable',
+  'conversation_history_invalid', 'conversation_not_found',
+]);
 
 /**
  * One-question copilot surface bound to the selected case (FR-016). It keeps a single question and answer in memory
  * only; a different case or user resets it. The answer and record payloads are rendered as React text, never markup.
  */
 export default function CopilotPanel({ session, caseId }: Props) {
-  const scope = `${session.id}\u0000${caseId ?? ''}`;
+  const scope = `${session.id}\u0000${session.role}\u0000${caseId ?? ''}`;
   const [state, setState] = useState<Exchange>(() => blank(scope));
   const request = useRef(0);
   const records = useRef(new Map<string, HTMLElement>());
@@ -60,11 +74,64 @@ export default function CopilotPanel({ session, caseId }: Props) {
     const note = presenter ? current.releaseNote : '';
     if (note.length > 0) body.releaseNote = note;
     const ticket = ++request.current;
-    update({ busy: true, error: '', answer: null, selected: '', sentNote: note });
+    if (current.conversationHandle) body.conversationHandle = current.conversationHandle;
+    update({ busy: true, busyLabel: 'Asking the copilot…', error: '', answer: null, selected: '', sentNote: note, statusMessage: '' });
     const outcome = await postCopilot<CopilotAnswer>('/api/v1/copilot/questions', session.csrfToken, body);
     if (ticket !== request.current) return;
-    if (outcome.ok) update({ busy: false, answer: outcome.value });
-    else update({ busy: false, error: copilotMessage(outcome.code) });
+    if (outcome.ok) {
+      const handle = outcome.value.conversationState === 'retired'
+        ? null
+        : outcome.value.conversationHandle ?? current.conversationHandle;
+      const history = handle
+        ? [...current.history, { question, answer: outcome.value.answer, citations: outcome.value.citations }]
+        : current.history;
+      update({
+        busy: false, busyLabel: '', answer: outcome.value, conversationHandle: handle,
+        resumeHandle: handle ?? '', history, error: '', statusMessage: '',
+      });
+    } else {
+      const terminal = terminalConversationErrors.has(outcome.code);
+      update({
+        busy: false, busyLabel: '', error: copilotMessage(outcome.code),
+        ...(terminal ? { answer: null, conversationHandle: null, resumeHandle: '', history: [] } : {}),
+      });
+    }
+  }
+
+  async function resume() {
+    if (current.busy) return;
+    const handle = current.resumeHandle.trim();
+    if (!handle) {
+      update({ error: copilotMessage('invalid_conversation_handle'), statusMessage: '' });
+      return;
+    }
+    const ticket = ++request.current;
+    update({
+      busy: true, busyLabel: 'Loading conversation history…', error: '', answer: null, selected: '',
+      conversationHandle: null, history: [], statusMessage: '',
+    });
+    const outcome = await getCopilotConversation(handle);
+    if (ticket !== request.current) return;
+    if (!outcome.ok) {
+      update({ busy: false, busyLabel: '', error: copilotMessage(outcome.code), conversationHandle: null, history: [] });
+      return;
+    }
+    const conversation = outcome.value;
+    if (conversation.conversationState !== 'active' || conversation.conversationHandle !== handle
+      || !Array.isArray(conversation.turns)
+      || conversation.turns.some((turn) => typeof turn.question !== 'string' || typeof turn.answer !== 'string' || !Array.isArray(turn.citations))) {
+      update({ busy: false, busyLabel: '', error: copilotMessage('invalid_response'), conversationHandle: null, history: [] });
+      return;
+    }
+    update({
+      busy: false, busyLabel: '', error: '', conversationHandle: conversation.conversationHandle,
+      resumeHandle: conversation.conversationHandle, history: conversation.turns, statusMessage: 'Conversation history restored.',
+    });
+  }
+
+  function startNew() {
+    request.current++;
+    setState({ ...blank(scope), statusMessage: 'New conversation started.' });
   }
 
   function select(key: string) {
@@ -78,13 +145,28 @@ export default function CopilotPanel({ session, caseId }: Props) {
   const available = new Set((answer?.records ?? []).map(recordKey));
   const detected = (answer?.records ?? []).filter((record) => record.screening?.state === 'detected');
   const unavailable = (answer?.records ?? []).some((record) => record.screening?.state === 'unavailable');
-  const status = current.busy ? 'Asking the copilot…' : answer ? 'Answer received.' : '';
+  const status = current.busy ? current.busyLabel : current.statusMessage || (answer ? 'Answer received.' : '');
+  const previousTurns = answer ? current.history.slice(0, -1) : current.history;
 
   return (
     <aside className="av-copilot" aria-labelledby={`${ids}-heading`}>
       <h2 id={`${ids}-heading`}>Case copilot</h2>
       <p className="av-notice av-copilot-notice">{COPILOT_NOTICE}</p>
       <p className="av-muted">{caseId ? `Selected case: ${caseId}` : 'No case selected. The copilot can list your cases only.'}</p>
+      <section className="av-copilot-conversation" aria-labelledby={`${ids}-conversation-heading`}>
+        <h3 id={`${ids}-conversation-heading`}>Conversation</h3>
+        <p className="av-muted">Resume with an opaque handle from this same user. The server rechecks access before returning history.</p>
+        <label className="av-field">Conversation handle
+          <input type="text" value={current.resumeHandle} readOnly={Boolean(current.conversationHandle)}
+            onChange={(event) => update({ resumeHandle: event.target.value })} />
+        </label>
+        <div className="av-copilot-actions">
+          <button type="button" className="av-button av-button-secondary" disabled={current.busy || !current.resumeHandle.trim() || Boolean(current.conversationHandle)}
+            onClick={() => void resume()}>Resume conversation</button>
+          <button type="button" className="av-button av-button-ghost" disabled={current.busy}
+            onClick={startNew}>Start new conversation</button>
+        </div>
+      </section>
       <form className="av-copilot-form" onSubmit={(event) => void send(event)}>
         <label className="av-field">Your question
           <textarea rows={3} maxLength={MAX_QUESTION} value={current.question} onChange={(event) => update({ question: event.target.value })} />
@@ -96,6 +178,15 @@ export default function CopilotPanel({ session, caseId }: Props) {
       </form>
       <p className="av-visually-hidden" role="status" aria-live="polite">{status}</p>
       {current.error && <p className="av-notice av-notice-alert" role="alert">{current.error}</p>}
+      {previousTurns.length > 0 && <section className="av-copilot-history" aria-labelledby={`${ids}-history-heading`}>
+        <h3 id={`${ids}-history-heading`}>Conversation history</h3>
+        {previousTurns.map((turn, index) => <article key={`${index}-${turn.question}`}>
+          <h4>Question</h4>
+          <p className="av-copilot-text">{turn.question}</p>
+          <h4>Answer</h4>
+          <p className="av-copilot-text">{turn.answer}</p>
+        </article>)}
+      </section>}
       {answer && <section className="av-copilot-answer" aria-labelledby={`${ids}-answer`}>
         <h3 id={`${ids}-answer`}>Answer</h3>
         <p className="av-copilot-text">{answer.answer}</p>

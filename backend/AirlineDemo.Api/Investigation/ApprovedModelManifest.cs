@@ -235,6 +235,7 @@ public sealed class SyntheticContentRegistry
     }
 
     public bool IsRegistered(string content) => _hashes.Contains(Sha256Hex(content));
+    internal IReadOnlyList<string> CommittedHashes => _hashes.Order(StringComparer.Ordinal).ToArray();
 
     public static string Sha256Hex(string content) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();

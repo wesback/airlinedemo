@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -13,10 +14,17 @@ public static partial class TelemetryRedaction
     public const string ServiceName = "airline-demo-api";
     public const string Redacted = "[redacted]";
     internal const string SourceSystemMeterName = "airline-demo-api.source-systems";
+    public const string ManagedAgentMeterName = "airline-demo-api.managed-agent";
 
     private static readonly Meter SourceSystemMeter = new(SourceSystemMeterName);
     private static readonly Counter<long> SourceSystemEventCounter =
         SourceSystemMeter.CreateCounter<long>("source.system.events");
+    private static readonly ActivitySource ManagedAgentActivitySource = new(ServiceName);
+    private static readonly Meter ManagedAgentMeter = new(ManagedAgentMeterName);
+    private static readonly Histogram<double> ManagedOperationDuration =
+        ManagedAgentMeter.CreateHistogram<double>("gen_ai.client.operation.duration", "s");
+    private static readonly Histogram<long> ManagedTokenUsage =
+        ManagedAgentMeter.CreateHistogram<long>("gen_ai.client.token.usage", "{token}");
 
     // Only enumerated diagnostic fields are emitted; any other key (for example free-text "detail") is dropped.
     private static readonly HashSet<string> AllowedKeys = new(StringComparer.Ordinal)
@@ -26,6 +34,10 @@ public static partial class TelemetryRedaction
         "investigation.citations", "investigation.decision", "enduser.pseudo.id",
         "investigation.outcome", "error.type", "severity.text", "severity.number",
         "source.id", "case.id", "event.outcome", "duration", "action", "fixture.role",
+        "gen_ai.provider.name", "gen_ai.operation.name", "gen_ai.agent.id", "gen_ai.agent.name", "gen_ai.agent.version",
+        "gen_ai.conversation.id", "gen_ai.response.id", "gen_ai.tool.call.id", "gen_ai.tool.name",
+        "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "gen_ai.token.type",
+        "http.request.method", "http.request.resend_count", "http.response.status_code", "exception.type",
     };
 
     public static class SecurityEvents
@@ -116,6 +128,21 @@ public static partial class TelemetryRedaction
         "reserve-calc", "citation-search",
         "get_case_inventory", "get_approved_requirements", "get_source_page", "search_within_basis", "get_processing_status",
     };
+    private static readonly HashSet<string> AllowedManagedTools = new(StringComparer.Ordinal)
+    {
+        "advance_stage", "get_approved_requirements", "get_case_inventory", "get_case_summary", "get_open_points",
+        "get_processing_status", "get_source_page", "get_source_record", "list_my_cases", "list_source_records",
+        "read_source", "search_within_basis",
+    };
+    private static readonly HashSet<string> AllowedManagedOperations = new(StringComparer.Ordinal)
+    {
+        "invoke_agent", "execute_tool", "create_conversation", "get_conversation", "list_conversation_items",
+        "delete_conversation", "create_response", "get_response", "delete_response",
+    };
+    private static readonly HashSet<string> AllowedHttpMethods = new(StringComparer.Ordinal)
+    {
+        "GET", "POST", "DELETE",
+    };
 
     private static readonly HashSet<string> AllowedOutcomes = new(StringComparer.Ordinal) { "approved", "rejected", "escalated" };
 
@@ -137,6 +164,7 @@ public static partial class TelemetryRedaction
     private static readonly Regex DeploymentRule = new(@"^[a-z0-9][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
     private static readonly Regex CitationRule = new(@"^doc-[0-9]{1,6}#p[0-9]{1,4}$", RegexOptions.CultureInvariant);
     private static readonly Regex ActorRule = new(@"^actor-[0-9a-f]{16}$", RegexOptions.CultureInvariant);
+    private static readonly Regex OpaqueReferenceRule = new(@"^ref-[0-9a-f]{16}$", RegexOptions.CultureInvariant);
     private static readonly Regex VersionRule = new(@"^[0-9]+\.[0-9]+\.[0-9]+([\-+][0-9A-Za-z.\-]+)?$", RegexOptions.CultureInvariant);
     private static readonly Regex EnvironmentRule = new(@"^[a-z][a-z0-9\-]{0,31}$", RegexOptions.CultureInvariant);
     private static readonly Regex ErrorTypeRule = new(@"^[a-z][a-z0-9.\-]{0,63}$", RegexOptions.CultureInvariant);
@@ -149,6 +177,10 @@ public static partial class TelemetryRedaction
 
     public static bool IsAllowedErrorType(string value) => ErrorTypeRule.IsMatch(value);
     private static bool DemoFixtureRole(string value) => AllowedFixtureRoles.Contains(value);
+
+    internal static bool IsAllowedExporterAttribute(string key, IReadOnlySet<string>? approvedSourceAttributes) =>
+        AllowedKeys.Contains(key)
+        && (!IsSourceSpecificAttribute(key) || approvedSourceAttributes?.Contains(key) == true);
 
     internal static bool IsSourceSpecificAttribute(string key) =>
         key.StartsWith("source.", StringComparison.OrdinalIgnoreCase)
@@ -182,6 +214,22 @@ public static partial class TelemetryRedaction
         ["duration"] = v => long.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var duration) && duration >= 0,
         ["action"] = v => v is "role-switch" or "case-reset",
         ["fixture.role"] = v => v == "unknown" || DemoFixtureRole(v),
+        ["gen_ai.provider.name"] = v => v == "azure.ai.foundry",
+        ["gen_ai.operation.name"] = v => AllowedManagedOperations.Contains(v),
+        ["gen_ai.agent.id"] = v => OpaqueReferenceRule.IsMatch(v),
+        ["gen_ai.agent.name"] = v => v is "airline-copilot" or "airline-investigator",
+        ["gen_ai.agent.version"] = v => Regex.IsMatch(v, "^[1-9][0-9]{0,9}$", RegexOptions.CultureInvariant),
+        ["gen_ai.conversation.id"] = v => OpaqueReferenceRule.IsMatch(v),
+        ["gen_ai.response.id"] = v => OpaqueReferenceRule.IsMatch(v),
+        ["gen_ai.tool.call.id"] = v => OpaqueReferenceRule.IsMatch(v),
+        ["gen_ai.tool.name"] = v => AllowedManagedTools.Contains(v),
+        ["gen_ai.usage.input_tokens"] = v => long.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var inputTokens) && inputTokens >= 0,
+        ["gen_ai.usage.output_tokens"] = v => long.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var outputTokens) && outputTokens >= 0,
+        ["gen_ai.token.type"] = v => v is "input" or "output",
+        ["http.request.method"] = v => AllowedHttpMethods.Contains(v),
+        ["http.request.resend_count"] = v => int.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var resendCount) && resendCount is >= 0 and <= 8,
+        ["http.response.status_code"] = v => int.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var statusCode) && statusCode is >= 100 and <= 599,
+        ["exception.type"] = v => IsAllowedErrorType(v),
     };
 
     // Keeps only allowlisted keys, drops denylisted keys and replaces values that fail their key's rule.
@@ -216,6 +264,101 @@ public static partial class TelemetryRedaction
         using var hmac = new HMACSHA256(key);
         var digest = hmac.ComputeHash(Encoding.UTF8.GetBytes(actorId));
         return "actor-" + Convert.ToHexString(digest, 0, 8).ToLowerInvariant();
+    }
+
+    public static string OpaqueReference(string value)
+    {
+        using var hmac = new HMACSHA256(SessionPseudonymKey);
+        var digest = hmac.ComputeHash(Encoding.UTF8.GetBytes(value));
+        return "ref-" + Convert.ToHexString(digest, 0, 8).ToLowerInvariant();
+    }
+
+    public static Activity? StartManagedOperation(
+        string operation,
+        AirlineDemo.Api.Foundry.ManagedAgentTarget target,
+        string? conversationId = null,
+        string? responseId = null,
+        string? toolName = null,
+        string? toolCallId = null,
+        int resendCount = 0)
+    {
+        if (!AllowedManagedOperations.Contains(operation))
+        {
+            throw new ArgumentException("Operation must be an enumerated managed-agent operation.", nameof(operation));
+        }
+
+        var activity = ManagedAgentActivitySource.StartActivity(
+            operation == "execute_tool" ? "execute_tool" : operation == "invoke_agent" ? "invoke_agent" : operation.Replace('_', '.'),
+            operation == "execute_tool" ? ActivityKind.Internal : ActivityKind.Client);
+        if (activity is null)
+        {
+            return null;
+        }
+
+        activity.SetTag("gen_ai.provider.name", "azure.ai.foundry");
+        activity.SetTag("gen_ai.operation.name", operation);
+        activity.SetTag("gen_ai.agent.id", OpaqueReference($"{target.Name}:{target.Version}:{target.ConfigurationId}"));
+        activity.SetTag("gen_ai.agent.name", target.Name);
+        activity.SetTag("gen_ai.agent.version", target.Version);
+        activity.SetTag("http.request.resend_count", resendCount);
+        if (conversationId is not null)
+        {
+            activity.SetTag("gen_ai.conversation.id", OpaqueReference(conversationId));
+        }
+        if (responseId is not null)
+        {
+            activity.SetTag("gen_ai.response.id", OpaqueReference(responseId));
+        }
+        if (toolName is not null && toolCallId is not null)
+        {
+            activity.SetTag("gen_ai.tool.name", toolName);
+            activity.SetTag("gen_ai.tool.call.id", OpaqueReference(toolCallId));
+        }
+        return activity;
+    }
+
+    public static void RecordManagedOperationDuration(string operation, double durationSeconds)
+    {
+        if (operation != "invoke_agent" || !double.IsFinite(durationSeconds) || durationSeconds < 0)
+        {
+            return;
+        }
+
+        var tags = new TagList
+        {
+            { "gen_ai.provider.name", "azure.ai.foundry" },
+            { "gen_ai.operation.name", operation },
+        };
+        ManagedOperationDuration.Record(durationSeconds, tags);
+    }
+
+    public static void RecordManagedTokenUsage(string tokenType, long? count)
+    {
+        if (count is not { } value || value < 0 || tokenType is not ("input" or "output"))
+        {
+            return;
+        }
+
+        var tags = new TagList
+        {
+            { "gen_ai.token.type", tokenType },
+        };
+        ManagedTokenUsage.Record(value, tags);
+    }
+
+    public static void MarkManagedOperationFailed(Activity? activity, string errorCode)
+    {
+        if (activity is null)
+        {
+            return;
+        }
+
+        activity.SetStatus(ActivityStatusCode.Error);
+        var errorType = Regex.Replace(errorCode, "[^A-Za-z0-9.-]", "-").ToLowerInvariant();
+        if (IsAllowedErrorType(errorType))
+        {
+            activity.SetTag("error.type", errorType);
+        }
     }
 
     // M-08: one investigation trace correlating basis, model, tools, citations, decision, actor and outcome.

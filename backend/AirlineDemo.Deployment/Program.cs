@@ -10,7 +10,15 @@ namespace AirlineDemo.Deployment;
 
 public static class Program
 {
-    public static Task Main(string[] args) => SqlDeployment.RunAsync(args);
+    public static async Task<int> Main(string[] args)
+    {
+        if (args.Length > 0 && args[0] == "managed-cleanup")
+            return await ManagedCleanupCommand.RunAsync(args[1..]);
+        if (args.Length > 0 && args[0] == "managed-agents")
+            return await ManagedAgentSetupCommand.RunAsync(args[1..]);
+        await SqlDeployment.RunAsync(args);
+        return 0;
+    }
 }
 
 public static class SqlDeployment

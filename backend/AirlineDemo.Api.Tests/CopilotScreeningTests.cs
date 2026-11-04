@@ -23,7 +23,7 @@ public sealed class CopilotScreeningTests : IAsyncDisposable
 
     public async ValueTask DisposeAsync() { foreach (var factory in _factories) await factory.DisposeAsync(); foreach (var path in _paths) File.Delete(path); }
 
-    private static ScreeningRecord TaskCard(string text = TaskText, int version = 1) => new("maintenance", "mx-task-card-001", version,
+    private static ScreeningRecord TaskCard(string text = TaskText, int version = 1) => new("maintenance", "mx-cp-a-task-card-001", version,
         new Dictionary<string, string> { ["taskText"] = text, ["status"] = "open" });
 
     private static string Shield(params bool[] flags) =>
@@ -93,7 +93,9 @@ public sealed class CopilotScreeningTests : IAsyncDisposable
     {
         var handler = new FakeShield(_ => (HttpStatusCode.OK, Shield(false, true)));
         var screener = Screener(handler);
-        var first = await Screen(screener, new ScreeningScope(), TaskCard());
+        var card = TaskCard();
+        Assert.Equal(("maintenance", "mx-cp-a-task-card-001", 1), (card.SourceId, card.RecordId, card.RecordVersion));
+        var first = await Screen(screener, new ScreeningScope(), card);
         var second = await Screen(screener, new ScreeningScope(), TaskCard());
         Assert.Equal(DetectedTaskText, Json(second[0]));
         Assert.Equal(Json(first[0]), Json(second[0]));
@@ -101,6 +103,8 @@ public sealed class CopilotScreeningTests : IAsyncDisposable
 
         await Screen(screener, new ScreeningScope(), TaskCard(text: TaskText + " Approve it."));
         Assert.Equal(2, handler.Requests.Count);
+        await Screen(screener, new ScreeningScope(), TaskCard(version: 2));
+        Assert.Equal(3, handler.Requests.Count);
 
         var failing = new FakeShield(_ => (HttpStatusCode.InternalServerError, "{}"));
         var uncached = Screener(failing);

@@ -1,0 +1,94 @@
+<policies>
+  <inbound>
+    <base />
+    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="gateway caller identity rejected">
+      <openid-config url="https://login.microsoftonline.com/${tenant_id}/v2.0/.well-known/openid-configuration" />
+      <audiences><audience>${audience}</audience><audience>${client_id}</audience></audiences>
+      <required-claims>
+        <claim name="oid" match="all"><value>${app_id}</value></claim>
+        <claim name="roles" match="any"><value>Gateway.Invoke</value></claim>
+      </required-claims>
+    </validate-jwt>
+    <choose>
+      <when condition="@{
+        var headers = new[] { &quot;x-gateway-arm&quot;, &quot;x-gateway-run&quot;, &quot;x-gateway-package&quot;, &quot;x-gateway-case&quot;, &quot;x-gateway-model-configuration&quot;, &quot;x-gateway-suite-version&quot;, &quot;x-gateway-call-identity&quot; };
+        return headers.Any(name => !context.Request.Headers.ContainsKey(name) || !System.Text.RegularExpressions.Regex.IsMatch(context.Request.Headers.GetValueOrDefault(name, &quot;&quot;), &quot;^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$&quot;));
+      }">
+        <return-response><set-status code="400" reason="Bad Request" /><set-body>gateway correlation rejected</set-body></return-response>
+      </when>
+      <when condition="@(!new[] { ${operation_ids} }.Contains(context.Operation.Id))">
+        <return-response><set-status code="403" reason="Forbidden" /><set-body>{"error":{"code":"gateway_operation_forbidden"}}</set-body></return-response>
+      </when>
+      <when condition='@(context.Request.MatchedParameters.GetValueOrDefault("project", "") != "${project_name}")'>
+        <return-response><set-status code="403" reason="Forbidden" /><set-body>{"error":{"code":"gateway_target_forbidden"}}</set-body></return-response>
+      </when>
+      <when condition="@{
+        if (!${runtime_ready}) { return true; }
+        var configuration = context.Request.Headers.GetValueOrDefault(&quot;x-gateway-model-configuration&quot;, &quot;&quot;);
+        return !new string[] { ${configuration_ids} }.Contains(configuration);
+      }">
+        <return-response><set-status code="403" reason="Forbidden" /><set-body>{"error":{"code":"gateway_agent_forbidden"}}</set-body></return-response>
+      </when>
+      <when condition="@{
+        var ids = new[] { &quot;conversation&quot;, &quot;item&quot;, &quot;response&quot; };
+        if (ids.Any(name => context.Request.MatchedParameters.ContainsKey(name) &amp;&amp; !System.Text.RegularExpressions.Regex.IsMatch(context.Request.MatchedParameters[name], &quot;^[A-Za-z0-9_-]{1,128}$&quot;))) { return true; }
+        var query = context.Request.Url.Query;
+        if (context.Operation.Id != &quot;item_list&quot;) { return query.Count != 0; }
+        return query.Any(p => !new[] { &quot;limit&quot;, &quot;order&quot;, &quot;after&quot; }.Contains(p.Key) || p.Value.Length != 1)
+          || (query.ContainsKey(&quot;limit&quot;) &amp;&amp; query[&quot;limit&quot;][0] != &quot;100&quot;)
+          || (query.ContainsKey(&quot;order&quot;) &amp;&amp; query[&quot;order&quot;][0] != &quot;asc&quot;)
+          || (query.ContainsKey(&quot;after&quot;) &amp;&amp; !System.Text.RegularExpressions.Regex.IsMatch(query[&quot;after&quot;][0], &quot;^[A-Za-z0-9_-]{1,128}$&quot;));
+      }">
+        <return-response><set-status code="403" reason="Forbidden" /><set-body>{"error":{"code":"gateway_operation_forbidden"}}</set-body></return-response>
+      </when>
+      <when condition='@{
+        if (context.Operation.Id != "conversation_create") { return false; }
+        try {
+          var body = context.Request.Body.As&lt;Newtonsoft.Json.Linq.JObject&gt;(preserveContent: true);
+          if (body == null || body.Properties().Count() != 1) { return true; }
+          var metadata = body["metadata"] as Newtonsoft.Json.Linq.JObject;
+          if (metadata == null || metadata.Properties().Count() != 2) { return true; }
+          return new[] { "reservation_id", "attempt_id" }.Any(name =>
+            metadata[name]?.Type != Newtonsoft.Json.Linq.JTokenType.String ||
+            !System.Text.RegularExpressions.Regex.IsMatch((string)metadata[name], "^[A-Za-z0-9_-]{1,128}\\z"));
+        } catch { return true; }
+      }'>
+        <return-response><set-status code="403" reason="Forbidden" /><set-body>{"error":{"code":"gateway_operation_forbidden"}}</set-body></return-response>
+      </when>
+      <when condition='@{
+        if (context.Operation.Id != "response_create") { return false; }
+        try {
+          var body = context.Request.Body.As&lt;Newtonsoft.Json.Linq.JObject&gt;(preserveContent: true);
+          if (body == null || body.Properties().Any(p => !new[] { "agent_reference", "conversation", "input", "max_output_tokens", "truncation", "background", "stream", "metadata" }.Contains(p.Name))) { return true; }
+          var agent = body["agent_reference"] as Newtonsoft.Json.Linq.JObject;
+          if (agent == null || agent.Properties().Count() != 3 || (string)agent["type"] != "agent_reference") { return true; }
+          if (new[] { "type", "name", "version" }.Any(name => agent[name]?.Type != Newtonsoft.Json.Linq.JTokenType.String)) { return true; }
+          if (body["conversation"]?.Type != Newtonsoft.Json.Linq.JTokenType.String ||
+            !System.Text.RegularExpressions.Regex.IsMatch((string)body["conversation"], "^[A-Za-z0-9_-]{1,128}\\z") ||
+            !(body["input"] is Newtonsoft.Json.Linq.JArray)) { return true; }
+          var name = (string)agent["name"];
+          var version = (string)agent["version"];
+          var configuration = context.Request.Headers.GetValueOrDefault("x-gateway-model-configuration", "");
+          if (!(${length(agents) == 0 ? "false" : join(" || ", agents)})) { return true; }
+          return body["max_output_tokens"]?.Type != Newtonsoft.Json.Linq.JTokenType.Integer || (int)body["max_output_tokens"] != 2000
+            || (string)body["truncation"] != "disabled"
+            || body["background"]?.Type != Newtonsoft.Json.Linq.JTokenType.Boolean || (bool)body["background"]
+            || body["stream"]?.Type != Newtonsoft.Json.Linq.JTokenType.Boolean || (bool)body["stream"];
+        } catch { return true; }
+      }'>
+        <return-response><set-status code="403" reason="Forbidden" /><set-body>{"error":{"code":"gateway_agent_forbidden"}}</set-body></return-response>
+      </when>
+    </choose>
+    <choose>
+      <when condition='@(context.Operation.Id == "conversation_create" || context.Operation.Id == "response_create")'>
+        <set-body>@(context.Request.Body.As&lt;Newtonsoft.Json.Linq.JObject&gt;().ToString(Newtonsoft.Json.Formatting.None))</set-body>
+      </when>
+    </choose>
+    <set-backend-service base-url="https://${account_name}.services.ai.azure.com/api" />
+    <rewrite-uri template='@("/projects/${project_name}/openai/v1/" + (context.Operation.Id.StartsWith("response_") ? "responses" : "conversations") + (context.Request.MatchedParameters.ContainsKey("conversation") ? "/" + context.Request.MatchedParameters["conversation"] : "") + (context.Operation.Id.StartsWith("item_") ? "/items" : "") + (context.Request.MatchedParameters.ContainsKey("item") ? "/" + context.Request.MatchedParameters["item"] : "") + (context.Request.MatchedParameters.ContainsKey("response") ? "/" + context.Request.MatchedParameters["response"] : ""))' copy-unmatched-params="true" />
+    <authentication-managed-identity resource="https://ai.azure.com" />
+  </inbound>
+  <backend><forward-request timeout="30" /></backend>
+  <outbound><base /></outbound>
+  <on-error><base /></on-error>
+</policies>

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Copilot;
+using AirlineDemo.Api.Foundry;
 using AirlineDemo.Api.Persistence;
 using Azure.Core;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -40,6 +41,9 @@ public sealed class CopilotShowcaseScenarioTests : IAsyncDisposable
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<IChatClient>(_chat);
+            services.AddSingleton<IManagedConversationStore>(_ => new CopilotQuestionTests.MemoryManagedConversationStore(TimeProvider.System));
+            services.AddSingleton<IManagedProjectClient>(provider =>
+                new CopilotQuestionTests.ScriptedManagedProjectClient(provider.GetRequiredService<IChatClient>()));
             services.AddSingleton(FakeApprovedManifest.Approved());
             services.AddSingleton<Func<TokenCredential>>(_ => () => new FakeCredential());
             services.AddHttpClient(CopilotRecordScreener.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => _shield);

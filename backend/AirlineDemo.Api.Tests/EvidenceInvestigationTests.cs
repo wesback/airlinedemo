@@ -8,6 +8,7 @@ using System.Text;
 using System.Reflection;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -85,6 +86,11 @@ public sealed class EvidenceInvestigationTests : IDisposable
             builder.ConfigureTestServices(services =>
             {
                 services.AddSingleton(client);
+                services.AddSingleton<AirlineDemo.Api.Foundry.IManagedProjectClient>(
+                    new CopilotQuestionTests.ScriptedManagedProjectClient(client));
+                services.AddSingleton<AirlineDemo.Api.Persistence.IManagedConversationStore>(
+                    new CopilotQuestionTests.MemoryManagedConversationStore(TimeProvider.System));
+                services.AddSingleton<IChatClient>(new CountingChatClient());
                 services.AddSingleton(FakeApprovedManifest.Approved());
                 if (store is not null) services.AddSingleton(store);
                 if (sources is not null) services.AddSingleton<AirlineDemo.Api.Evidence.EvidenceCaseReadSourceFactory>(sources);
@@ -588,6 +594,13 @@ public sealed class EvidenceInvestigationTests : IDisposable
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
         Assert.Equal(1, model.Calls);
+        var managedProject = Assert.IsType<CopilotQuestionTests.ScriptedManagedProjectClient>(
+            factory.Services.GetRequiredService<AirlineDemo.Api.Foundry.IManagedProjectClient>());
+        Assert.Equal(["investigator"], managedProject.ResponseWorkloads);
+        Assert.NotEmpty(managedProject.AgentTargets);
+        Assert.All(managedProject.AgentTargets, managedTarget =>
+            Assert.Equal(("investigator-agent", "1", new string('a', 64)),
+                (managedTarget.Name, managedTarget.Version, managedTarget.ConfigurationId)));
 
         var store = new CaseStateStore(_statePath);
         var state = store.Read(ScopeFor(store));
@@ -602,6 +615,8 @@ public sealed class EvidenceInvestigationTests : IDisposable
         var item = Assert.Single(state.WorkItems!);
         Assert.Equal(("review-case-001", "open", "technical-reviewer"), (item.ItemId, item.State, item.Owner));
         Assert.Equal("approved", store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId)!.Outcome);
+        var legacyClient = Assert.IsType<CountingChatClient>(factory.Services.GetRequiredService<IChatClient>());
+        Assert.Equal(0, legacyClient.Calls);
 
         // A repeated submission replays the receipt: no second basis, event, work item or model call.
         using var repeat = await PostDemoPackageAsync(client, presenter, "case-001");
@@ -610,6 +625,39 @@ public sealed class EvidenceInvestigationTests : IDisposable
         var replayed = after.Read(ScopeFor(after));
         Assert.Equal(state.Revision, replayed.Revision);
         Assert.Equal(1, model.Calls);
+    }
+
+    [Fact]
+    public async Task SessionRemovedDuringManagedHistoryReadSuppressesInvestigatorResponse()
+    {
+        const string quote = "No installation record for ESN-DEMO1-212 is included in this records package.";
+        var claim = $$"""[{"text":"{{quote}}","witnesses":[{"documentId":"llp-status-sheet.pdf","page":1,"quote":"{{quote}}"}]}]""";
+        var model = new CountingChatClient(claim);
+        using var factory = CreateFactory(model);
+        using var client = factory.CreateClient();
+        var presenter = await SignInAsync(client, "presenter");
+        var sessionId = presenter.Cookie[(presenter.Cookie.IndexOf('=') + 1)..];
+        var sessions = factory.Services.GetRequiredService<DemoSessionStore>();
+        var project = (CopilotQuestionTests.ScriptedManagedProjectClient)
+            factory.Services.GetRequiredService<AirlineDemo.Api.Foundry.IManagedProjectClient>();
+        project.AfterListAsync = _ =>
+        {
+            sessions.Remove(sessionId);
+            return Task.CompletedTask;
+        };
+
+        using var response = await PostDemoPackageAsync(client, presenter, "case-001");
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(1, project.ListCalls);
+        Assert.Equal(0, model.Calls);
+        var legacyClient = Assert.IsType<CountingChatClient>(factory.Services.GetRequiredService<IChatClient>());
+        Assert.Equal(0, legacyClient.Calls);
+        var store = new CaseStateStore(_statePath);
+        var state = store.Read(ScopeFor(store));
+        Assert.Equal(["package-received", "investigation-escalated"], state.JourneyEvents!.Select(e => e.EventType));
+        var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
+        Assert.Equal("escalated", store.FindTrace(ScopeFor(store), "case-001", packageId, "inv-" + packageId)!.Outcome);
     }
 
     [Fact]
@@ -626,13 +674,13 @@ public sealed class EvidenceInvestigationTests : IDisposable
         var store = new CaseStateStore(_statePath);
         var state = store.Read(ScopeFor(store));
         Assert.Equal(["package-received", "investigation-escalated"], state.JourneyEvents!.Select(e => e.EventType));
-        Assert.StartsWith("The AI agent could not reach the model service", state.JourneyEvents![1].Summary);
+        Assert.StartsWith("The AI agent could not complete a verified investigation", state.JourneyEvents![1].Summary);
         Assert.Equal("review-case-001", Assert.Single(state.WorkItems!).ItemId);
         Assert.Equal("escalated", store.FindTrace(ScopeFor(store), Case, packageId, "inv-" + packageId)!.Outcome);
     }
 
     [Fact]
-    public async Task ExhaustedModelRetriesEscalateToTechnicalReviewInsteadOfFailingTheUpload()
+    public async Task UncertainModelSubmissionEscalatesWithoutRetry()
     {
         var model = new UnreachableModelClient();
         using var factory = CreateFactory(model);
@@ -642,12 +690,12 @@ public sealed class EvidenceInvestigationTests : IDisposable
         using var response = await PostDemoPackageAsync(client, presenter, "case-001");
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var packageId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("packageId").GetString()!;
-        Assert.Equal(3, model.Calls);
+        Assert.Equal(1, model.Calls);
 
         var store = new CaseStateStore(_statePath);
         var state = store.Read(ScopeFor(store));
         Assert.Equal(["package-received", "investigation-escalated"], state.JourneyEvents!.Select(e => e.EventType));
-        Assert.Equal("The AI agent could not reach the model service, so no findings were produced. The package goes to a technical reviewer, who checks the records manually.",
+        Assert.Equal("The AI agent could not complete a verified investigation, so no findings were produced. The package goes to a technical reviewer, who checks the records manually.",
             state.JourneyEvents[1].Summary);
         var item = Assert.Single(state.WorkItems!);
         Assert.Equal(("review-case-001", "open", "technical-reviewer"), (item.ItemId, item.State, item.Owner));
@@ -655,7 +703,7 @@ public sealed class EvidenceInvestigationTests : IDisposable
 
         using var repeat = await PostDemoPackageAsync(client, presenter, "case-001");
         Assert.Equal(HttpStatusCode.OK, repeat.StatusCode);
-        Assert.Equal(3, model.Calls);
+        Assert.Equal(1, model.Calls);
         Assert.Equal(state.Revision, new CaseStateStore(_statePath).Read(ScopeFor(store)).Revision);
     }
 

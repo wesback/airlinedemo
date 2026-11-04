@@ -51,7 +51,7 @@ public sealed record InvestigationClaim(
     internal IReadOnlyCollection<SourceRecordWitness>? VerifiedSourceBasis { get; init; }
 }
 
-public sealed record InvestigationResult(IReadOnlyList<InvestigationClaim> Claims, IReadOnlyList<ModelCallTrace> ModelCalls);
+public sealed record InvestigationResult(IReadOnlyList<InvestigationClaim> Claims, IReadOnlyList<ModelCallTrace>? ModelCalls);
 
 /// <summary>
 /// One case-scoped, read-only investigation. The task, identity, scope, policy and tool set are fixed here; document
@@ -134,7 +134,7 @@ public sealed class BoundedInvestigator(
                 throw new InvestigationLimitExceededException(breach);
             }
 
-            result = new InvestigationResult(VerifyClaims(response.Text, traceRecorder, sourceTools), gate.Traces);
+            result = new InvestigationResult(VerifyClaims(response.Text, caseId, source, traceRecorder, sourceTools), gate.Traces);
             outcome = "approved";
             return result;
         }
@@ -196,7 +196,7 @@ public sealed class BoundedInvestigator(
         }
     }
 
-    private static string BuildPrompt(IReadOnlyList<string> documents)
+    internal static string BuildPrompt(IReadOnlyList<string> documents)
     {
         var prompt = new StringBuilder(
             "Investigate the case documents below and return the claims JSON. For every source-backed claim, add sourceWitnesses entries using the exact sourceId, recordId and recordVersion returned by a permitted source tool.\n");
@@ -215,10 +215,13 @@ public sealed class BoundedInvestigator(
             .Where(part => part.Length >= 20)
             .Any(part => claimText.Contains(part, StringComparison.Ordinal));
 
-    private IReadOnlyList<InvestigationClaim> VerifyClaims(
+    internal static IReadOnlyList<InvestigationClaim> VerifyClaims(
         string modelText,
+        string boundCaseId,
+        ICaseReadSource caseSource,
         InvestigationTraceRecorder? traceRecorder,
-        SourceReadTools? sourceTools)
+        SourceReadTools? sourceTools,
+        Action<string>? authorizePage = null)
     {
         var sourceWitnesses = sourceTools?.ReadWitnesses;
         List<ClaimDto>? dtos;
@@ -236,7 +239,7 @@ public sealed class BoundedInvestigator(
             throw new InvestigationOutputException("model returned no claims");
         }
 
-        var inventory = source.GetInventory(caseId);
+        var inventory = caseSource.GetInventory(boundCaseId);
         var claims = new List<InvestigationClaim>(dtos.Count);
         foreach (var dto in dtos)
         {
@@ -273,7 +276,8 @@ public sealed class BoundedInvestigator(
                     throw new InvestigationOutputException("claim contains marked personal data");
                 }
 
-                var page = source.GetSourcePage(caseId, witness.DocumentId, witness.Page);
+                var page = caseSource.GetSourcePage(boundCaseId, witness.DocumentId, witness.Page);
+                if (page is not null) authorizePage?.Invoke(page);
                 if (page is null || !page.Contains(witness.Quote, StringComparison.Ordinal))
                 {
                     if (witness.Page >= 1)

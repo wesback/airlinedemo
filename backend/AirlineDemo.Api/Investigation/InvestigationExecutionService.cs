@@ -1,3 +1,4 @@
+using AirlineDemo.Api.Foundry;
 using AirlineDemo.Api.Persistence;
 
 namespace AirlineDemo.Api.Investigation;
@@ -10,7 +11,7 @@ namespace AirlineDemo.Api.Investigation;
 /// </summary>
 public sealed class InvestigationExecutionService(ICaseStateStore store)
 {
-    public async Task<InvestigationResult> ExecuteAsync(
+    public Task<InvestigationResult> ExecuteAsync(
         CaseScope scope,
         InvestigationTraceContext context,
         BoundedInvestigator investigator,
@@ -21,13 +22,48 @@ public sealed class InvestigationExecutionService(ICaseStateStore store)
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(investigator);
+        return ExecuteCoreAsync(scope, context, documents, kind, basis, typedValue,
+            (recorder, token) => investigator.InvestigateAsync(documents, token, recorder), cancellationToken);
+    }
+
+    public Task<InvestigationResult> ExecuteManagedAsync(
+        CaseScope scope,
+        InvestigationTraceContext context,
+        IReadOnlyList<string> documents,
+        ClaimKind kind,
+        IReadOnlyDictionary<string, BasisDocument> basis,
+        string typedValue,
+        Func<InvestigationTraceRecorder, CancellationToken, Task<InvestigationResult>> execute,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(execute);
+        return ExecuteCoreAsync(scope, context, documents, kind, basis, typedValue, async (recorder, token) =>
+        {
+            try { return await execute(recorder, token); }
+            catch (ManagedProjectException failure) when (LimitBreach(failure.Code) is { } breach)
+            {
+                throw new InvestigationLimitExceededException(breach);
+            }
+        }, cancellationToken);
+    }
+
+    private async Task<InvestigationResult> ExecuteCoreAsync(
+        CaseScope scope,
+        InvestigationTraceContext context,
+        IReadOnlyList<string> documents,
+        ClaimKind kind,
+        IReadOnlyDictionary<string, BasisDocument> basis,
+        string typedValue,
+        Func<InvestigationTraceRecorder, CancellationToken, Task<InvestigationResult>> execute,
+        CancellationToken cancellationToken)
+    {
         BoundedInvestigator.ValidateDocuments(documents);
         var recorder = new InvestigationTraceRecorder(store, scope, context);
 
         InvestigationResult result;
         try
         {
-            result = await investigator.InvestigateAsync(documents, cancellationToken, recorder);
+            result = await execute(recorder, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -43,4 +79,15 @@ public sealed class InvestigationExecutionService(ICaseStateStore store)
         recorder.Complete("approved");
         return result;
     }
+
+    private static InvestigationBreach? LimitBreach(string code) => code switch
+    {
+        "copilot_tool_limit" => InvestigationBreach.ToolCalls,
+        "copilot_model_limit" => InvestigationBreach.ModelCalls,
+        "copilot_timeout" => InvestigationBreach.Time,
+        "copilot_input_token_limit" => InvestigationBreach.InputTokens,
+        "copilot_output_token_limit" => InvestigationBreach.OutputTokens,
+        "copilot_retry_limit" => InvestigationBreach.Retries,
+        _ => null,
+    };
 }

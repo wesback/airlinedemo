@@ -5,7 +5,10 @@ using AirlineDemo.Api.Reviews;
 namespace AirlineDemo.Api.Copilot;
 
 /// <summary>An operation result; <c>OutcomeRecorded</c> is set when the store already appended the outcome in its own transaction.</summary>
-public sealed record CopilotInvocationResult(IResult Result, int HttpStatus, string ResultCode, CopilotOutcome Outcome, bool OutcomeRecorded = false);
+public sealed record CopilotInvocationResult(IResult Result, int HttpStatus, string ResultCode, CopilotOutcome Outcome, bool OutcomeRecorded = false)
+{
+    internal bool NativeReceiptCommitted { get; init; }
+}
 
 /// <summary>
 /// Wraps one copilot operation in durable admission and outcome records. The provenance is chosen by the calling
@@ -38,6 +41,13 @@ public static class CopilotInvocation
             throw;
         }
 
+        if (result.NativeReceiptCommitted)
+        {
+            // The release's own outcome is atomic with its receipt; this enclosing question has a separate admission.
+            try { await ledger.Outcome(admission, result.HttpStatus, result.ResultCode, result.Outcome, CancellationToken.None); }
+            catch (CopilotAuditUnavailableException) { }
+            return result.Result;
+        }
         if (result.OutcomeRecorded) return result.Result;
         try { await ledger.Outcome(admission, result.HttpStatus, result.ResultCode, result.Outcome, cancellationToken); }
         catch (CopilotAuditUnavailableException) { return AuditUnavailable(); }

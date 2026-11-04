@@ -61,8 +61,13 @@ public sealed class SqlCaseStateStoreTests
         AssertMapped(db, typeof(CaseDecisionRow), "dbo", "case_decisions");
         AssertMapped(db, typeof(CaseEventRow), "audit", "case_events");
         AssertMapped(db, typeof(CasePackResetReceiptRow), "dbo", "case_pack_reset_receipts");
+        AssertMapped(db, typeof(ManagedConversationRow), "dbo", "managed_conversations");
 
-        foreach (var table in new[] { "cases", "case_documents", "case_decisions", "case_events", "case_pack_reset_receipts" })
+        foreach (var table in new[]
+                 {
+                     "cases", "case_documents", "case_decisions", "case_events", "case_pack_reset_receipts",
+                     "managed_conversations",
+                 })
         {
             using var check = connection.CreateCommand();
             check.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $name";
@@ -80,6 +85,8 @@ public sealed class SqlCaseStateStoreTests
 
         var ensured = operations.OfType<EnsureSchemaOperation>().Select(o => o.Name).ToArray();
         Assert.Contains("audit", ensured);
+        Assert.Contains("20261103120000_ManagedConversations", db.Database.GetAppliedMigrations());
+        Assert.Contains("20261103130000_ManagedConversationCleanup", db.Database.GetAppliedMigrations());
         var auditIndex = operations.FindIndex(o => o is EnsureSchemaOperation e && e.Name == "audit");
         var eventsIndex = operations.FindIndex(o => o is CreateTableOperation c && c.Name == "case_events");
         Assert.True(auditIndex >= 0 && auditIndex < eventsIndex, "audit schema must be created before audit.case_events");

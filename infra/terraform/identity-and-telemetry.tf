@@ -58,7 +58,7 @@ locals {
     audit       = ["SELECT", "INSERT"]
   }
   # Case tables the app may read and write. The SQL adapter story (#179) owns the schema and keeps this list in step.
-  app_case_tables = ["cases", "case_documents", "case_decisions", "case_work_items", "case_pack_request_windows", "copilot_proposal_states"]
+  app_case_tables = ["cases", "case_documents", "case_decisions", "case_work_items", "case_pack_request_windows", "copilot_proposal_states", "managed_conversations"]
   app_append_only_tables = [
     "investigation_traces", "investigation_trace_steps", "case_assessments",
     "case_request_receipts", "case_journey_events", "case_pack_reset_receipts",

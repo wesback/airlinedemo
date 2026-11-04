@@ -2,6 +2,8 @@
 """Private deployment control plane. Secrets never travel in ordinary Run Command parameters."""
 import argparse
 import base64
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import hashlib
 import getpass
 import io
@@ -13,8 +15,11 @@ import shlex
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import uuid
+from urllib.parse import urlencode, urlparse
+from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 GUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
@@ -25,8 +30,9 @@ def run(*args, capture=False, **kwargs):
                           stdout=subprocess.PIPE if capture else None, **kwargs).stdout
 
 
-def az(*args):
-    return json.loads(run("az", *args, "--output", "json", capture=True))
+def az(*args, private=False):
+    return json.loads(run("az", *args, "--output", "json", capture=True,
+                          **({"stderr": subprocess.PIPE} if private else {})))
 
 
 def write_private(path, value):
@@ -40,6 +46,140 @@ def write_private(path, value):
 def confirm(message):
     if input(message + " Type yes: ") != "yes":
         raise RuntimeError("Declined; no saved plan applied.")
+
+
+def canonical_sha256(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                     allow_nan=False).encode()).hexdigest()
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def evidence_time(value):
+    instant = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("UTC offset required")
+    return instant
+
+
+def evidence_number(value, minimum=0):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Numeric evidence required")
+    number = Decimal(str(value))
+    if not number.is_finite() or number < minimum:
+        raise ValueError("Invalid numeric evidence")
+    return number
+
+
+def require_evidence(condition):
+    if not condition:
+        raise ValueError()
+
+
+def foundry_plan_fingerprint(plan, plan_bytes, source_commit, scope=None):
+    """Inspect the actual saved plan without returning its potentially secret values."""
+    resources = []
+
+    def collect(module):
+        resources.extend(module.get("resources", []))
+        for child in module.get("child_modules", []):
+            collect(child)
+
+    collect(plan["planned_values"]["root_module"])
+    wrappers = [resource["values"] for resource in resources
+                if resource["address"] == "azurerm_resource_group_template_deployment.foundry[0]"]
+    require_evidence(len(wrappers) == 1)
+    require_evidence(not any("delete" in change["change"]["actions"]
+                             for change in plan["resource_changes"]))
+    wrapper = wrappers[0]
+    require_evidence(wrapper["deployment_mode"] == "Incremental" and wrapper["debug_level"] == "none")
+    result = {
+        "sourceCommit": source_commit,
+        "planSha256": hashlib.sha256(plan_bytes).hexdigest(),
+        "configurationSha256": canonical_sha256(plan["planned_values"]),
+        "templateSha256": canonical_sha256(json.loads(wrapper["template_content"])),
+        "parametersSha256": canonical_sha256(json.loads(wrapper["parameters_content"])),
+        "models": sorted([{"name": resource["values"]["model"][0]["name"],
+                           "version": resource["values"]["model"][0]["version"],
+                           "sku": resource["values"]["sku"][0]["name"],
+                           "capacity": resource["values"]["sku"][0]["capacity"]}
+                          for resource in resources if resource.get("type") == "azurerm_cognitive_deployment"],
+                         key=canonical_sha256),
+    }
+    if scope is not None:
+        template, parameters = json.loads(wrapper["template_content"]), json.loads(wrapper["parameters_content"])
+        validate_foundry_template(template, parameters, scope)
+        require_evidence(wrapper["resource_group_name"] == scope.rsplit("/", 1)[-1])
+        result.update(template=template, parameters=parameters)
+    return result
+
+
+def foundry_template_outputs(stores):
+    reference = "reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName')), '2026-07-15-preview'"
+    parts = ", ".join(f"substring({reference}).internalId, {start}, {length})"
+                      for start, length in ((0, 8), (8, 4), (12, 4), (16, 4), (20, 12)))
+    workspace = "toLower(format('{0}-{1}-{2}-{3}-{4}', " + parts + "))"
+    containers = {}
+    for key, suffix in (("files", "-azureml-blobstore"), ("agent_files", "-azureml-agent")):
+        container = f"reference(concat('{stores['blobStore']}/blobServices/default/containers/', {workspace}, '{suffix}'), '2025-08-01', 'Full')"
+        containers[key] = {"id": f"[{container}.id]", "access": f"[{container}.properties.publicAccess]"}
+    return {
+        "projectPrincipalId": {"type": "string", "value": "[" + reference + ", 'Full').identity.principalId]"},
+        "projectInternalId": {"type": "string", "value": "[" + reference + ").internalId]"},
+        "projectStoreScopes": {"type": "object", "value": {
+            "containers": containers,
+            "cosmosDatabaseId": f"[reference('{stores['documentStore']}/sqlDatabases/enterprise_memory', '2024-08-15', 'Full').id]"}},
+    }
+
+
+def validate_foundry_template(template, parameters, scope):
+    """Admit only the documented two-resource account/project template profile."""
+    require_evidence(set(template) == {"$schema", "contentVersion", "parameters", "resources", "outputs"})
+    require_evidence(template["$schema"] == "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#")
+    require_evidence(template["contentVersion"] == "1.0.0.0")
+    require_evidence(template["parameters"] == {"accountName": {"type": "string"}, "projectName": {"type": "string"}})
+    require_evidence(set(parameters) == {"accountName", "projectName"})
+    for parameter in parameters.values():
+        require_evidence(set(parameter) == {"value"})
+        require_evidence(re.fullmatch(r"[a-z][a-z0-9-]{2,62}", parameter["value"]) is not None)
+    resources = template["resources"]
+    require_evidence(len(resources) == 2)
+    account, project = resources
+    require_evidence(set(account) == {"type", "apiVersion", "name", "location", "kind", "sku", "identity", "properties"})
+    require_evidence(set(project) == {"type", "apiVersion", "name", "location", "identity", "dependsOn", "properties"})
+    for resource, suffix in ((account, ""), (project, "/projects")):
+        require_evidence(resource["type"] == "Microsoft.CognitiveServices/accounts" + suffix)
+        require_evidence(resource["apiVersion"] == "2026-07-15-preview")
+        require_evidence(resource["location"] == "swedencentral")
+        require_evidence(resource["identity"] == {"type": "SystemAssigned"})
+    require_evidence(account["name"] == "[parameters('accountName')]")
+    require_evidence(account["kind"] == "AIServices" and account["sku"] == {"name": "S0"})
+    properties = account["properties"]
+    require_evidence(set(properties) == {"allowProjectManagement", "customSubDomainName", "disableLocalAuth",
+                                        "publicNetworkAccess", "capabilitySettings", "networkInjections"})
+    require_evidence(properties["allowProjectManagement"] is True and properties["disableLocalAuth"] is True)
+    require_evidence(properties["publicNetworkAccess"] == "Disabled")
+    require_evidence(properties["customSubDomainName"] == "[parameters('accountName')]")
+    expected_stores = {"blobStore": "Microsoft.Storage/storageAccounts",
+                       "documentStore": "Microsoft.DocumentDB/databaseAccounts",
+                       "vectorStore": "Microsoft.Search/searchServices"}
+    require_evidence(set(properties["capabilitySettings"]) == set(expected_stores))
+    for key, provider in expected_stores.items():
+        require_evidence(re.fullmatch(re.escape(scope + "/providers/" + provider) + r"/[A-Za-z0-9._-]+",
+                                     properties["capabilitySettings"][key]) is not None)
+    require_evidence(template["outputs"] == foundry_template_outputs(properties["capabilitySettings"]))
+    require_evidence(len(properties["networkInjections"]) == 1)
+    injection = properties["networkInjections"][0]
+    require_evidence(set(injection) == {"scenario", "subnetArmId", "useMicrosoftManagedNetwork"})
+    require_evidence(injection["scenario"] == "agent" and injection["useMicrosoftManagedNetwork"] is False)
+    require_evidence(re.fullmatch(re.escape(scope + "/providers/Microsoft.Network/virtualNetworks/") +
+                                 r"[A-Za-z0-9._-]+/subnets/[A-Za-z0-9._-]+", injection["subnetArmId"]) is not None)
+    require_evidence(project["name"] == "[format('{0}/{1}', parameters('accountName'), parameters('projectName'))]")
+    require_evidence(project["dependsOn"] == ["[resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName'))]"])
+    require_evidence(project["properties"] == {"displayName": "[parameters('projectName')]",
+                                              "capabilitySettings": properties["capabilitySettings"]})
 
 
 class Deployment:
@@ -61,6 +201,454 @@ class Deployment:
         self.app_rg = f"rg-{args.prefix}"
         self.vault = f"kv-{args.prefix}-{suffix}"
         self.registry = f"acr{args.prefix}{suffix}"
+
+    def foundry_plan_evidence(self, candidate=False):
+        scope = f"/subscriptions/{self.args.subscription_id}/resourceGroups/{self.app_rg}" if candidate else None
+        script = """python3 - <<'PY'
+import json, pathlib, runpy, subprocess
+helpers = runpy.run_path('scripts/deploy-private.py')
+path = pathlib.Path('/var/lib/airlinedemo/foundry.tfplan')
+plan_bytes = path.read_bytes()
+import os, tempfile
+with tempfile.NamedTemporaryFile(dir=path.parent, prefix='foundry-inspect.') as snapshot:
+    snapshot.write(plan_bytes)
+    snapshot.flush()
+    os.chmod(snapshot.name, 0o400)
+    plan = json.loads(subprocess.check_output(['terraform', '-chdir=infra/terraform', 'show', '-json', snapshot.name]))
+    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+    print(json.dumps(helpers['foundry_plan_fingerprint'](plan, plan_bytes, revision, scope=SCOPE)))
+PY
+"""
+        return json.loads(self.execute(script.replace("scope=SCOPE", "scope=" + repr(scope))))
+
+    def foundry_plan(self):
+        (self.directory / "foundry-candidate.json").unlink(missing_ok=True)
+        (self.directory / "foundry-preflight.json").unlink(missing_ok=True)
+        try:
+            require_evidence(self.args.location == "swedencentral")
+            estimate = json.loads((self.directory / "foundry-estimate-inputs.json").read_text())
+            require_evidence(set(estimate) == {"quotaRequests", "usage", "meterSkus"})
+            require_evidence(bool(estimate["usage"]) and set(estimate["usage"]) == set(estimate["meterSkus"]))
+            self.execute("""export ARM_RESOURCE_PROVIDER_REGISTRATIONS=none
+if [ -d "$PWD/fresh-settings" ]; then
+  export TFVARS_FILE="$PWD/fresh-settings/deploy.tfvars.json"
+  export BACKEND_CONFIG_FILE="$PWD/fresh-settings/backend.hcl"
+  test -r "$TFVARS_FILE"
+  test -r "$BACKEND_CONFIG_FILE"
+fi
+terraform -chdir=infra/terraform init -input=false -reconfigure -backend-config="$BACKEND_CONFIG_FILE" > /var/lib/airlinedemo/foundry-plan.log 2>&1
+terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out=/var/lib/airlinedemo/foundry.tfplan >> /var/lib/airlinedemo/foundry-plan.log 2>&1
+""")
+            projection = self.foundry_plan_evidence(candidate=True)
+            require_evidence(projection["sourceCommit"] == run("git", "-C", str(ROOT), "rev-parse", "HEAD", capture=True).strip())
+            subscription = ("--subscription", self.args.subscription_id)
+            scope = f"/subscriptions/{self.args.subscription_id}/resourceGroups/{self.app_rg}"
+            assignments = sorted(az("policy", "assignment", "list", "--scope", scope, "--filter", "atScope()",
+                                    "--expand", "LatestDefinitionVersion,EffectiveDefinitionVersion",
+                                    *subscription, private=True), key=lambda row: row["id"])
+            inventory = sorted(az("resource", "list", "--resource-group", self.app_rg, *subscription, private=True),
+                               key=lambda row: row["id"])
+            candidate = {**estimate, "meterIds": sorted(estimate["usage"]),
+                         **{key: projection[key] for key in ("models", "template", "parameters")},
+                         "bindings": {**{key: projection[key] for key in (
+                             "sourceCommit", "configurationSha256", "planSha256", "templateSha256", "parametersSha256")},
+                             "assignmentSha256": canonical_sha256(assignments),
+                             "retainedResourceSha256": canonical_sha256(inventory)}}
+            write_private(self.directory / "foundry-candidate.json", json.dumps(candidate, indent=2))
+            return self.foundry_preflight(candidate)
+        except (LookupError, TypeError, ValueError, AttributeError, ArithmeticError, RuntimeError,
+                OSError, EOFError, subprocess.CalledProcessError):
+            (self.directory / "foundry-candidate.json").unlink(missing_ok=True)
+            (self.directory / "foundry-preflight.json").unlink(missing_ok=True)
+            raise RuntimeError("foundry_preflight_refused") from None
+
+    def foundry_arm_evidence(self, request):
+        scope = f"/subscriptions/{self.args.subscription_id}/resourceGroups/{self.app_rg}"
+        template, parameters = request["template"], request["parameters"]
+        validate_foundry_template(template, parameters, scope)
+        require_evidence(canonical_sha256(template) == request["bindings"]["templateSha256"])
+        require_evidence(canonical_sha256(parameters) == request["bindings"]["parametersSha256"])
+        with tempfile.TemporaryDirectory(prefix="foundry-arm-", dir=self.directory) as directory:
+            template_file, parameters_file = Path(directory) / "template.json", Path(directory) / "parameters.json"
+            write_private(template_file, json.dumps(template))
+            write_private(parameters_file, json.dumps(parameters))
+            arguments = ("--resource-group", self.app_rg, "--template-file", str(template_file),
+                         "--parameters", "@" + str(parameters_file), "--mode", "Incremental",
+                         "--subscription", self.args.subscription_id)
+            validation = az("deployment", "group", "validate", *arguments, private=True)
+            write_private(self.directory / "foundry-native-arm.json",
+                          json.dumps({"runId": request["runId"], "validation": validation}))
+            require_evidence(validation.get("error") is None)
+            require_evidence(validation["properties"]["provisioningState"] == "Succeeded")
+            what_if = az("deployment", "group", "what-if", *arguments, "--no-pretty-print",
+                         "--result-format", "FullResourcePayloads", private=True)
+            write_private(self.directory / "foundry-native-arm.json",
+                          json.dumps({"runId": request["runId"], "validation": validation, "whatIf": what_if}))
+            require_evidence(what_if["status"] == "Succeeded" and not what_if.get("error"))
+            account_id = scope + "/providers/Microsoft.CognitiveServices/accounts/" + parameters["accountName"]["value"]
+            allowed = {account_id.lower(), (account_id + "/projects/" + parameters["projectName"]["value"]).lower()}
+            require_evidence(len(what_if["changes"]) == len(allowed))
+            require_evidence({change["resourceId"].lower() for change in what_if["changes"]} == allowed)
+            for change in what_if["changes"]:
+                require_evidence(change["resourceId"].lower() in allowed)
+                require_evidence(change["changeType"] in ("Create", "Modify", "NoChange"))
+        return {"validate": "Succeeded", "whatIf": "Succeeded",
+                "templateSha256": canonical_sha256(template), "parametersSha256": canonical_sha256(parameters),
+                "changeSha256": canonical_sha256(sorted(what_if["changes"], key=lambda change: change["resourceId"].lower()))}
+
+    def foundry_discovery(self, request):
+        require_evidence(self.args.location == "swedencentral")
+        account = az("account", "show", private=True)
+        require_evidence(account["tenantId"] == self.args.tenant_id and account["id"] == self.args.subscription_id)
+        fingerprint = self.foundry_plan_evidence()
+        for key in ("sourceCommit", "configurationSha256", "planSha256", "templateSha256", "parametersSha256"):
+            require_evidence(fingerprint[key] == request["bindings"][key])
+        require_evidence(fingerprint["models"] == sorted(request["models"], key=canonical_sha256))
+        require_evidence(bool(request["models"]))
+        subscription = ("--subscription", self.args.subscription_id)
+        scope = f"/subscriptions/{self.args.subscription_id}/resourceGroups/{self.app_rg}"
+        assignments = sorted(az("policy", "assignment", "list", "--scope", scope, "--filter", "atScope()",
+                                "--expand", "LatestDefinitionVersion,EffectiveDefinitionVersion", *subscription, private=True),
+                             key=lambda row: row["id"])
+        inventory = sorted(az("resource", "list", "--resource-group", self.app_rg, *subscription, private=True),
+                           key=lambda row: row["id"])
+        require_evidence(canonical_sha256(assignments) == request["bindings"]["assignmentSha256"])
+        require_evidence(canonical_sha256(inventory) == request["bindings"]["retainedResourceSha256"])
+        providers = []
+        for namespace, types in (
+                ("Microsoft.CognitiveServices", ("accounts", "accounts/projects")),
+                ("Microsoft.DocumentDB", ("databaseAccounts",)),
+                ("Microsoft.Storage", ("storageAccounts",)),
+                ("Microsoft.Search", ("searchServices",)),
+                ("Microsoft.Network", ("virtualNetworks",)),
+                ("Microsoft.App", ("managedEnvironments",))):
+            provider = az("provider", "show", "--namespace", namespace, *subscription, private=True)
+            require_evidence(provider["registrationState"] == "Registered")
+            for name in types:
+                matches = [row for row in provider["resourceTypes"] if row["resourceType"] == name]
+                require_evidence(len(matches) == 1)
+                require_evidence("swedencentral" in {location.replace(" ", "").lower()
+                                                     for location in matches[0]["locations"]})
+                if namespace == "Microsoft.CognitiveServices":
+                    require_evidence("2026-07-15-preview" in matches[0]["apiVersions"])
+            providers.append(provider)
+        skus = az("cognitiveservices", "account", "list-skus", "--kind", "AIServices",
+                  "--location", self.args.location, *subscription, private=True)
+        require_evidence(any(row["name"] == "S0" and row["kind"] == "AIServices" and not row["restrictions"]
+                             for row in skus))
+        models = az("cognitiveservices", "model", "list", "--location", self.args.location, *subscription, private=True)
+        usages = az("cognitiveservices", "usage", "list", "--location", self.args.location, *subscription, private=True)
+        required_quota = {}
+        for required in request["models"]:
+            matches = list({canonical_sha256(row["model"]): row["model"] for row in models
+                            if row["model"]["name"] == required["name"]
+                            and row["model"]["version"] == required["version"]
+                            and row["model"]["format"] == "OpenAI"}.values())
+            require_evidence(len(matches) == 1)
+            matching_skus = [row for row in matches[0]["skus"]
+                             if row["name"] == required["sku"] and row["usageName"] in request["quotaRequests"]]
+            require_evidence(len(matching_skus) == 1)
+            for retirement in (matches[0].get("deprecation", {}).get("inference"),
+                               matching_skus[0].get("deprecationDate")):
+                if retirement:
+                    require_evidence(evidence_time(retirement) > evidence_time(request["startedAt"]))
+            quota_name = matching_skus[0]["usageName"]
+            require_evidence(quota_name in request["quotaRequests"])
+            capacity = matching_skus[0]["capacity"]
+            value = evidence_number(required["capacity"], minimum=1)
+            require_evidence(value == value.to_integral_value())
+            for bound, comparison in (("minimum", lambda limit: value >= limit),
+                                      ("maximum", lambda limit: value <= limit)):
+                if capacity.get(bound) is not None:
+                    require_evidence(comparison(evidence_number(capacity[bound])))
+            if capacity.get("minimum") is None or capacity.get("step") is None:
+                require_evidence(value == evidence_number(capacity["default"], minimum=1))
+            else:
+                minimum, step = evidence_number(capacity["minimum"]), evidence_number(capacity["step"])
+                require_evidence(step > 0 and (value - minimum) % step == 0)
+            required_quota[quota_name] = required_quota.get(quota_name, Decimal(0)) + value
+        for name, requested in required_quota.items():
+            require_evidence(evidence_number(request["quotaRequests"][name]["requested"]) >= requested)
+        quota = []
+        for name, requested in request["quotaRequests"].items():
+            matches = [row for row in usages if row["name"]["value"] == name]
+            require_evidence(len(matches) == 1 and matches[0]["unit"] == requested["unit"])
+            available = evidence_number(matches[0]["limit"]) - evidence_number(matches[0]["currentValue"])
+            require_evidence(available >= evidence_number(requested["requested"]) > 0)
+            quota.append({"name": name, **requested, "available": float(available)})
+        raw = {"runId": request["runId"], "assignments": assignments, "inventory": inventory,
+               "providers": providers, "skus": skus, "models": models, "usages": usages}
+        write_private(self.directory / "foundry-discovery.json", json.dumps(raw, indent=2))
+        return {"provider": {"status": "available", "sourceSha256": canonical_sha256(
+                    {"providers": providers, "skus": skus, "models": models})},
+                "quota": sorted(quota, key=lambda row: row["name"])}
+
+    def foundry_quote(self, request):
+        items, sources = [], []
+        for meter_id in request["meterIds"]:
+            require_evidence(GUID.fullmatch(meter_id) is not None)
+            usage = request["usage"][meter_id]
+            region = usage.get("region", "swedencentral")
+            require_evidence(region in ("swedencentral", "Global", ""))
+            url = "https://prices.azure.com/api/retail/prices?" + urlencode({
+                "currencyCode": "'USD'", "$filter": f"armRegionName eq '{region}' and meterId eq '{meter_id}'"})
+            rows, seen = [], set()
+            while url:
+                parsed = urlparse(url)
+                require_evidence(parsed.scheme == "https" and parsed.netloc == "prices.azure.com"
+                                 and parsed.path == "/api/retail/prices" and url not in seen)
+                seen.add(url)
+                with urlopen(url, timeout=30) as response:
+                    page = json.load(response)
+                sources.append(page)
+                rows.extend(row for row in page["Items"] if row["meterId"] == meter_id
+                            and row["armRegionName"] == region and row["currencyCode"] == "USD"
+                            and row["type"] == "Consumption"
+                            and row["skuName"] == request["meterSkus"][meter_id]
+                            and row["productName"] == usage["productName"] and row["unitOfMeasure"] == usage["unit"]
+                            and evidence_time(row["effectiveStartDate"]) <= evidence_time(request["startedAt"])
+                            and (not row.get("effectiveEndDate") or
+                                 evidence_time(row["effectiveEndDate"]) > evidence_time(request["startedAt"])))
+                url = page.get("NextPageLink")
+            require_evidence(bool(rows))
+            latest = max(evidence_time(row["effectiveStartDate"]) for row in rows)
+            rows = [row for row in rows if evidence_time(row["effectiveStartDate"]) == latest]
+            quantity = evidence_number(usage["quantity"], minimum=0)
+            tiers = [evidence_number(row["tierMinimumUnits"]) for row in rows]
+            require_evidence(all(quantity < tier for tier in tiers if tier > 0))
+            rows = [row for row in rows if evidence_number(row["tierMinimumUnits"]) == 0]
+            require_evidence(len(rows) == 1)
+            row = rows[0]
+            require_evidence(evidence_number(row["tierMinimumUnits"]) == 0)
+            require_evidence(row["skuName"] == request["meterSkus"][meter_id])
+            require_evidence(row["unitOfMeasure"] == usage["unit"] and row["productName"] == usage["productName"])
+            price = evidence_number(row["retailPrice"])
+            items.append({"meterId": meter_id, "sku": row["skuName"], "unit": row["unitOfMeasure"],
+                          "unitPrice": row["retailPrice"], "quantity": usage["quantity"],
+                          "usageAssumption": usage["usageAssumption"], "estimatedCost": float(price * quantity)})
+        write_private(self.directory / "foundry-prices.json", json.dumps({"runId": request["runId"], "pages": sources}))
+        return {"source": "https://prices.azure.com/api/retail/prices", "currency": "USD", "items": items,
+                "estimatedCost": float(sum((evidence_number(item["estimatedCost"]) for item in items), Decimal(0)))}
+
+    def acquire_foundry_evidence(self, request):
+        discovery = self.foundry_discovery(request)
+        quote, arm = self.foundry_quote(request), self.foundry_arm_evidence(request)
+        assessment_file = self.directory / "foundry-assessments.json"
+        assessment_file.unlink(missing_ok=True)
+        confirm(f"Acquire current authorized policy and New-runtime capacity assessments for run {request['runId']} "
+                f"using the private request/discovery files, and write {assessment_file}. Evidence ready?")
+        assessments = json.loads(assessment_file.read_text())
+        require_evidence(assessments["capacity"]["quotaRequestsSha256"] == canonical_sha256(request["quotaRequests"]))
+        return {"schemaVersion": 1, "runId": request["runId"], "identity": request["identity"],
+                "bindings": request["bindings"], "capturedAt": utc_now(), **discovery,
+                "quote": quote, "arm": arm, "policy": assessments["policy"], "capacity": assessments["capacity"]}
+
+    def validate_foundry_evidence(self, request, evidence):
+        """Validate one invocation's evidence; callers must gather it at the cloud edge."""
+        try:
+            require = require_evidence
+            require(request["schemaVersion"] == evidence["schemaVersion"] == 1)
+            require(evidence["runId"] == request["runId"])
+            started, captured = evidence_time(request["startedAt"]), evidence_time(evidence["capturedAt"])
+            require(started <= captured <= evidence_time(utc_now()))
+            identity = {"tenantId": self.args.tenant_id, "subscriptionId": self.args.subscription_id,
+                        "region": self.args.location}
+            require(identity["region"] == "swedencentral")
+            require(request["identity"] == evidence["identity"] == identity)
+            bindings = request["bindings"]
+            require(set(bindings) == {"sourceCommit", "configurationSha256", "planSha256",
+                                      "assignmentSha256", "retainedResourceSha256",
+                                      "templateSha256", "parametersSha256"})
+            require(re.fullmatch(r"[0-9a-f]{40}", bindings["sourceCommit"]) is not None)
+            for name, value in bindings.items():
+                if name != "sourceCommit":
+                    require(re.fullmatch(r"[0-9a-f]{64}", value) is not None)
+            require(evidence["bindings"] == bindings)
+            require(evidence["provider"]["status"] == "available")
+            require(re.fullmatch(r"[0-9a-f]{64}", evidence["provider"]["sourceSha256"]) is not None)
+            quota = evidence["quota"]
+            require(bool(quota) and len({row["name"] for row in quota}) == len(quota))
+            require(canonical_sha256({row["name"]: {"unit": row["unit"], "requested": row["requested"]}
+                                      for row in quota}) == canonical_sha256(request["quotaRequests"]))
+            for row in quota:
+                require(evidence_number(row["requested"]) > 0)
+                require(evidence_number(row["available"]) >= evidence_number(row["requested"]))
+            capacity, policy = evidence["capacity"], evidence["policy"]
+            require(capacity["status"] == "verified" and policy["status"] == "approved")
+            for assessment in (capacity, policy):
+                require(assessment["runId"] == request["runId"])
+                require(started <= evidence_time(assessment["capturedAt"]) <= captured)
+                require(assessment["configurationSha256"] == bindings["configurationSha256"])
+                require(isinstance(assessment["sourceReference"], str) and bool(assessment["sourceReference"].strip()))
+                require(re.fullmatch(r"[0-9a-f]{64}", assessment["sourceSha256"]) is not None)
+            require(policy["assignmentSha256"] == bindings["assignmentSha256"])
+            arm = evidence["arm"]
+            require(arm["validate"] == arm["whatIf"] == "Succeeded")
+            require(arm["templateSha256"] == bindings["templateSha256"])
+            require(arm["parametersSha256"] == bindings["parametersSha256"])
+            require(re.fullmatch(r"[0-9a-f]{64}", arm["changeSha256"]) is not None)
+            quote = evidence["quote"]
+            require(quote["source"] == "https://prices.azure.com/api/retail/prices")
+            require(quote["currency"] == "USD" and bool(quote["items"]))
+            require(len({item["meterId"] for item in quote["items"]}) == len(quote["items"]))
+            require(sorted(item["meterId"] for item in quote["items"]) == sorted(request["meterIds"]))
+            total = Decimal(0)
+            for item in quote["items"]:
+                require(item["sku"] == request["meterSkus"][item["meterId"]])
+                require(isinstance(item["unit"], str) and bool(item["unit"].strip()))
+                require(isinstance(item["usageAssumption"], str) and bool(item["usageAssumption"].strip()))
+                require(evidence_number(item["quantity"]) > 0)
+                cost = evidence_number(item["unitPrice"]) * evidence_number(item["quantity"])
+                require(cost == evidence_number(item["estimatedCost"]))
+                total += cost
+            require(total == evidence_number(quote["estimatedCost"]))
+            canonical_sha256(evidence)
+        except (KeyError, TypeError, ValueError, AttributeError, InvalidOperation, OverflowError):
+            raise RuntimeError("foundry_preflight_refused") from None
+        return evidence
+
+    def foundry_preflight(self, candidate=None, acquire=None):
+        """The acquisition callback is a read-only cloud/policy edge, never an apply."""
+        receipt = self.directory / "foundry-preflight.json"
+        receipt.unlink(missing_ok=True)
+        try:
+            if candidate is None:
+                candidate = json.loads((self.directory / "foundry-candidate.json").read_text())
+            if acquire is None:
+                acquire = self.acquire_foundry_evidence
+            request = json.loads(json.dumps(candidate, allow_nan=False))
+            request.update(schemaVersion=1, runId=uuid.uuid4().hex, startedAt=utc_now(),
+                           identity={"tenantId": self.args.tenant_id,
+                                     "subscriptionId": self.args.subscription_id, "region": self.args.location})
+            write_private(self.directory / "foundry-preflight-request.json", json.dumps(request, indent=2))
+            if run("git", "-C", str(ROOT), "rev-parse", "HEAD", capture=True).strip() != request["bindings"]["sourceCommit"]:
+                raise ValueError()
+            evidence = json.loads(json.dumps(acquire(json.loads(json.dumps(request))), allow_nan=False))
+            self.validate_foundry_evidence(request, evidence)
+            write_private(receipt, json.dumps(evidence, indent=2, allow_nan=False))
+            return evidence
+        except (LookupError, TypeError, ValueError, AttributeError, ArithmeticError, RuntimeError,
+                OSError, EOFError, subprocess.CalledProcessError):
+            raise RuntimeError("foundry_preflight_refused") from None
+
+    def foundry_apply(self, candidate=None, acquire=None):
+        evidence = self.foundry_preflight(candidate, acquire)
+        try:
+            confirm(f"Apply Foundry plan {evidence['bindings']['planSha256']} with estimated additional "
+                    f"cost USD {evidence['quote']['estimatedCost']} for the recorded usage assumptions?")
+        except (RuntimeError, EOFError):
+            (self.directory / "foundry-preflight.json").unlink(missing_ok=True)
+            raise
+        try:
+            refreshed = self.foundry_preflight(candidate, acquire)
+            for name in ("identity", "bindings", "provider", "quota", "arm", "quote"):
+                if canonical_sha256(refreshed[name]) != canonical_sha256(evidence[name]):
+                    raise ValueError()
+            for name in ("capacity", "policy"):
+                for field in ("status", "sourceReference", "sourceSha256", "configurationSha256"):
+                    if refreshed[name][field] != evidence[name][field]:
+                        raise ValueError()
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            (self.directory / "foundry-preflight.json").unlink(missing_ok=True)
+            raise RuntimeError("deployment_prerequisite_failed") from None
+        digest = refreshed["bindings"]["planSha256"]
+        self.execute(f"""set -euo pipefail
+plan=$(mktemp /var/lib/airlinedemo/foundry-approved.XXXXXX)
+trap 'rm -f "$plan"' EXIT
+cp /var/lib/airlinedemo/foundry.tfplan "$plan"
+chmod 400 "$plan"
+printf '%s  %s\\n' '{digest}' "$plan" | sha256sum --check --status
+terraform -chdir=infra/terraform apply -input=false "$plan"
+""")
+
+    def foundry_agents(self):
+        outputs = json.loads(self.execute("terraform -chdir=infra/terraform output -json"))
+        setup = outputs.get("foundry_agent_setup", {}).get("value")
+        if not isinstance(setup, dict):
+            raise RuntimeError("foundry_agents_not_ready")
+        publisher_resource_id = setup.get("publisher_identity_resource_id")
+        if not isinstance(publisher_resource_id, str) or not publisher_resource_id.startswith(
+                f"/subscriptions/{self.args.subscription_id}/resourceGroups/{self.app_rg}/"):
+            raise RuntimeError("foundry_publisher_identity_invalid")
+        publisher = az("identity", "show", "--ids", publisher_resource_id)
+        publisher_client_id = publisher.get("clientId")
+        if not isinstance(publisher_client_id, str) or not GUID.fullmatch(publisher_client_id):
+            raise RuntimeError("foundry_publisher_identity_invalid")
+        executor = az("vm", "show", "-g", self.rg, "-n", self.vm)
+        assigned = (executor.get("identity") or {}).get("userAssignedIdentities") or {}
+        if publisher_resource_id.lower() in {identity.lower() for identity in assigned}:
+            raise RuntimeError("foundry_publisher_identity_already_attached")
+
+        config = {
+            "projectEndpoint": setup.get("project_endpoint"),
+            "projectName": setup.get("project_name"),
+            "publisherClientId": publisher_client_id,
+            "modelDeployment": setup.get("runtime_deployment"),
+            "modelName": setup.get("runtime_model_name"),
+            "modelVersion": setup.get("runtime_model_version"),
+            "filterPolicy": setup.get("filter_policy"),
+            "manifestPath": "/var/lib/airlinedemo/managed-agent-release.json",
+            "stateDirectory": "/var/lib/airlinedemo/managed-agent-setup",
+        }
+        encoded = base64.b64encode(json.dumps(config, separators=(",", ":")).encode()).decode()
+        output = self.execute(f"""umask 077
+printf '%s' '{encoded}' | base64 -d > /var/lib/airlinedemo/managed-agent-setup.json
+chmod 600 /var/lib/airlinedemo/managed-agent-setup.json
+dotnet run --project backend/AirlineDemo.Deployment -- managed-agents plan /var/lib/airlinedemo/managed-agent-setup.json
+""")
+        preview_line = next((line for line in output.splitlines()
+                             if line.startswith("MANAGED_AGENT_PREVIEW:")), None)
+        if preview_line is None:
+            raise RuntimeError("foundry_agent_preview_missing")
+        try:
+            preview = json.loads(preview_line.removeprefix("MANAGED_AGENT_PREVIEW:"))
+            agents = preview["agents"]
+            if (preview["projectName"] != setup["project_name"] or len(agents) != 2 or
+                    {agent["workload"] for agent in agents} != {"copilot", "investigator"} or
+                    any(not re.fullmatch(r"[0-9a-f]{64}", agent["configurationId"]) for agent in agents)):
+                raise ValueError()
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            raise RuntimeError("foundry_agent_preview_invalid") from None
+        confirm(f"Publish the two immutable Foundry agents to {setup['project_name']} "
+                f"using definition preview {canonical_sha256(preview)}?")
+
+        run("az", "vm", "identity", "assign", "-g", self.rg, "-n", self.vm,
+            "--identities", publisher_resource_id, "-o", "none")
+        try:
+            publish_output = self.remote(f"""set -euo pipefail
+export AZURE_CONFIG_DIR=/var/lib/airlinedemo/azure
+cd {shlex.quote(str(self.source))}
+az account set --subscription {shlex.quote(self.args.subscription_id)}
+dotnet run --project backend/AirlineDemo.Deployment -- managed-agents publish /var/lib/airlinedemo/managed-agent-setup.json
+""")
+        finally:
+            run("az", "vm", "identity", "remove", "-g", self.rg, "-n", self.vm,
+                "--identities", publisher_resource_id, "-o", "none")
+
+        manifest_line = next((line for line in publish_output.splitlines()
+                              if line.startswith("MANAGED_AGENT_MANIFEST:")), None)
+        if manifest_line is None:
+            raise RuntimeError("foundry_agent_manifest_missing")
+        try:
+            manifest = json.loads(manifest_line.removeprefix("MANAGED_AGENT_MANIFEST:"))
+            entries = manifest["agents"]
+            preview_agents = {agent["workload"]: agent for agent in agents}
+            if (manifest["schemaVersion"] != 1 or manifest["projectName"] != setup["project_name"] or
+                    manifest["projectEndpoint"] != setup["project_endpoint"] or len(entries) != 2 or
+                    {entry["workload"] for entry in entries} != {"copilot", "investigator"} or
+                    any(not re.fullmatch(r"[0-9]+", entry["version"]) or
+                        not re.fullmatch(r"[0-9a-f]{64}", entry["configurationId"]) or
+                        entry["configurationId"] != preview_agents[entry["workload"]]["configurationId"] or
+                        entry["name"] != preview_agents[entry["workload"]]["name"] or
+                        entry["definitionSha256"] != preview_agents[entry["workload"]]["definitionSha256"] or
+                        any(entry[field] != preview_agents[entry["workload"]][field]
+                            for field in ("modelDeployment", "modelName", "modelVersion", "filterPolicy"))
+                        for entry in entries)):
+                raise ValueError()
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            raise RuntimeError("foundry_agent_manifest_invalid") from None
+        write_private(self.directory / "managed-agent-release.json", json.dumps(manifest, indent=2))
+        print("Saved the exact managed-agent release manifest locally; runtime gateway profile remains deny-only.")
 
     def remote(self, script):
         """Check the guest exit code, not just ARM's successful operation status."""
@@ -168,18 +756,27 @@ fi
 
     def sync(self):
         revision = run("git", "-C", str(ROOT), "rev-parse", "HEAD", capture=True).strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", revision):
+            raise RuntimeError("deployment_revision_invalid")
+        deployable = ("scripts", "infra", "backend", "frontend", "Dockerfile")
+        if run("git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no", "--",
+               *deployable, capture=True).strip():
+            raise RuntimeError("deployment_source_dirty")
         repository = json.loads(run("gh", "repo", "view", "--json", "nameWithOwner", capture=True))["nameWithOwner"]
         if repository != "wesback/airlinedemo":
             raise ValueError("This release identity configuration is scoped to wesback/airlinedemo.")
-        files = set(run("git", "-C", str(ROOT), "diff", "--name-only", "HEAD", capture=True).splitlines())
-        files.update(("scripts/deploy-private.py", "scripts/verify-deployment.py", "infra/terraform/deployment-executor.tf"))
-        files.update(("backend/AirlineDemo.Deployment/AirlineDemo.Deployment.csproj",
-                      "backend/AirlineDemo.Deployment/Program.cs"))
+        try:
+            published = json.loads(run("gh", "api", f"repos/{repository}/commits/{revision}", capture=True))["sha"]
+        except (subprocess.CalledProcessError, KeyError, ValueError):
+            raise RuntimeError("deployment_revision_unpublished") from None
+        if published != revision:
+            raise RuntimeError("deployment_revision_unpublished")
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory) / "source.tar"
+            run("git", "-C", str(ROOT), "archive", "--format=tar", f"--output={snapshot}", revision)
+            source_digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
         archive = io.BytesIO()
         with tarfile.open(fileobj=archive, mode="w:gz") as package:
-            for name in sorted(files):
-                if name.startswith(("infra/terraform/", "scripts/", "backend/AirlineDemo.Deployment/")) and (ROOT / name).is_file():
-                    package.add(ROOT / name, arcname=name)
             for name in ("deploy.tfvars.json", "backend.hcl"):
                 path = self.directory / name
                 if path.exists():
@@ -188,13 +785,16 @@ fi
                 if fresh.exists():
                     package.add(fresh, arcname=f"fresh-settings/{name}")
         encoded = base64.b64encode(archive.getvalue()).decode()
-        self.source = f"/var/lib/airlinedemo/source/{revision}"
+        self.source = f"/var/lib/airlinedemo/source/{revision}-{source_digest[:12]}"
         self.remote(f"""set -euo pipefail
 umask 077
 if [ ! -d {self.source}/.git ]; then
   git clone --quiet --filter=blob:none --no-checkout https://github.com/{repository}.git {self.source}
   git -C {self.source} checkout --quiet --detach {revision}
 fi
+test "$(git -C {self.source} rev-parse HEAD)" = '{revision}'
+git -C {self.source} diff --quiet HEAD --
+test "$(git -C {self.source} archive --format=tar HEAD | sha256sum | cut -d ' ' -f 1)" = '{source_digest}'
 printf '%s' '{encoded}' | base64 -d | tar xz -C {self.source}
 """)
         return revision
@@ -747,7 +1347,8 @@ def main():
     parser.add_argument("--prefix", default="demo1")
     parser.add_argument("--location", default="swedencentral")
     parser.add_argument("--stage", choices=("preflight", "plan-bootstrap", "bootstrap", "login", "inspect", "connect",
-                                           "prepare", "platform", "database", "configure", "build",
+                                           "prepare", "foundry-plan", "foundry-preflight", "foundry-apply", "foundry-agents",
+                                           "platform", "database", "configure", "build",
                                            "release", "application", "verify", "plan-destroy", "destroy", "all"), default="all")
     args = parser.parse_args()
     deployment = Deployment(args)
