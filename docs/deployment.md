@@ -155,6 +155,11 @@ deployment's resource group. This handles an NSG attached by tenant automation
 before the first association completed. Import does not change the live NSG;
 any subsequent association change remains visible in the complete saved plan.
 Foreign subnet readback or NSG scope stops reconciliation.
+Import can still fail before the Foundry project exists because Terraform
+evaluates generated-store readback and cannot find `enterprise_memory`.
+This stops recovery before a new saved plan; do not treat it as successful
+adoption or manually create service-owned stores. Retain the partial state
+and resolve the provisioning dependency before resuming.
 
 The provisioning identity can be an Entra user or service principal; Azure
 resolves its principal type for the two scoped store-provisioning grants.
