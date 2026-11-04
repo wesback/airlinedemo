@@ -146,7 +146,7 @@ class PrivateDeploymentTests(unittest.TestCase):
             "parameters": {"accountName": {"type": "string"}, "projectName": {"type": "string"}},
             "outputs": deployment.foundry_template_outputs(),
             "resources": [
-                {"type": "Microsoft.CognitiveServices/accounts", "apiVersion": "2026-07-15-preview",
+                {"type": "Microsoft.CognitiveServices/accounts", "apiVersion": "2026-09-15-preview",
                  "name": "[parameters('accountName')]", "location": "swedencentral",
                  "kind": "AIServices", "sku": {"name": "S0"}, "identity": {"type": "SystemAssigned"},
                  "properties": {"allowProjectManagement": True, "customSubDomainName": "[parameters('accountName')]",
@@ -154,7 +154,7 @@ class PrivateDeploymentTests(unittest.TestCase):
                                 "capabilitySettings": settings,
                                 "networkInjections": [{"scenario": "agent", "useMicrosoftManagedNetwork": False,
                                                        "subnetArmId": scope + "/providers/Microsoft.Network/virtualNetworks/synthetic/subnets/agents"}]}},
-                {"type": "Microsoft.CognitiveServices/accounts/projects", "apiVersion": "2026-07-15-preview",
+                {"type": "Microsoft.CognitiveServices/accounts/projects", "apiVersion": "2026-09-15-preview",
                  "name": "[format('{0}/{1}', parameters('accountName'), parameters('projectName'))]",
                  "location": "swedencentral", "identity": {"type": "SystemAssigned"},
                  "dependsOn": ["[resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName'))]"],
@@ -308,7 +308,9 @@ class PrivateDeploymentTests(unittest.TestCase):
                                 (("properties", "unexpected"), "not-admitted"),
                                 (("properties", "capabilitySettings", "documentStore"), 42),
                                 (("properties", "networkInjections", 0, "useMicrosoftManagedNetwork"), True),
-                                (("apiVersion",), "2026-05-15-preview")):
+                                (("apiVersion",), "2026-05-15-preview"),
+                                (("apiVersion",), "2026-07-15-preview"),
+                                (("apiVersion",), "2026-09-01")):
                 with self.subTest(path=path):
                     changed = copy.deepcopy(request)
                     target = changed["template"]["resources"][0]
@@ -371,7 +373,7 @@ class PrivateDeploymentTests(unittest.TestCase):
                                  ("Microsoft.App", ["managedEnvironments"]),
                                  ("Microsoft.DocumentDB", ["databaseAccounts"])):
             providers[namespace] = {"registrationState": "Registered", "resourceTypes": [
-                {"resourceType": name, "apiVersions": ["2026-07-15-preview"], "locations": ["Sweden Central"]}
+                {"resourceType": name, "apiVersions": ["2026-09-15-preview"], "locations": ["Sweden Central"]}
                 for name in names]}
         sources = {
             "account": {"id": instance.args.subscription_id, "tenantId": instance.args.tenant_id},
@@ -640,7 +642,8 @@ class PrivateDeploymentTests(unittest.TestCase):
 
     @patch.object(deployment, "run", return_value="a" * 40)
     def test_foundry_discovery_refuses_unknown_sources_before_prices_assessment_or_apply(self, run):
-        for field in ("account", "assignments", "inventory", "provider", "delegation-provider", "sku", "model", "quota", "unit", "plan"):
+        for field in ("account", "assignments", "inventory", "provider", "delegation-provider",
+                      "account-api", "project-api", "sku", "model", "quota", "unit", "plan"):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
                 instance = self.foundry_executor(directory)
                 candidate, sources, providers, cloud, page = self.foundry_cloud(instance)
@@ -654,6 +657,10 @@ class PrivateDeploymentTests(unittest.TestCase):
                     providers["Microsoft.Search"]["registrationState"] = "NotRegistered"
                 elif field == "delegation-provider":
                     providers["Microsoft.App"]["registrationState"] = "NotRegistered"
+                elif field in ("account-api", "project-api"):
+                    index = 0 if field == "account-api" else 1
+                    providers["Microsoft.CognitiveServices"]["resourceTypes"][index]["apiVersions"] = [
+                        "2026-07-15-preview"]
                 elif field == "sku":
                     sources["list-skus"] = []
                 elif field == "model":

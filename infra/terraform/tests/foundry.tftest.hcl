@@ -203,7 +203,7 @@ run "foundry_account_project_are_private_injected_and_single_owned" {
       [for resource in local.foundry_template.resources : resource.type] ==
       ["Microsoft.CognitiveServices/accounts", "Microsoft.CognitiveServices/accounts/projects"] &&
       alltrue([for resource in local.foundry_template.resources :
-        resource.apiVersion == "2026-07-15-preview" && resource.location == "swedencentral" &&
+        resource.apiVersion == "2026-09-15-preview" && resource.location == "swedencentral" &&
       resource.identity == { type = "SystemAssigned" }])
     )
     error_message = "The protected Incremental deployment must own only the two pinned account/project resources."

@@ -201,7 +201,7 @@ def foundry_plan_fingerprint(plan, plan_bytes, source_commit, scope=None):
 
 
 def foundry_template_outputs():
-    reference = "reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName')), '2026-07-15-preview'"
+    reference = "reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName')), '2026-09-15-preview'"
     return {
         "projectPrincipalId": {"type": "string", "value": "[" + reference + ", 'Full').identity.principalId]"},
         "projectInternalId": {"type": "string", "value": "[" + reference + ").internalId]"},
@@ -225,7 +225,7 @@ def validate_foundry_template(template, parameters, scope):
     require_evidence(set(project) == {"type", "apiVersion", "name", "location", "identity", "dependsOn", "properties"})
     for resource, suffix in ((account, ""), (project, "/projects")):
         require_evidence(resource["type"] == "Microsoft.CognitiveServices/accounts" + suffix)
-        require_evidence(resource["apiVersion"] == "2026-07-15-preview")
+        require_evidence(resource["apiVersion"] == "2026-09-15-preview")
         require_evidence(resource["location"] == "swedencentral")
         require_evidence(resource["identity"] == {"type": "SystemAssigned"})
     require_evidence(account["name"] == "[parameters('accountName')]")
@@ -427,7 +427,7 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
                 require_evidence(region in {location.replace(" ", "").lower()
                                            for location in matches[0]["locations"]})
                 if namespace == "Microsoft.CognitiveServices":
-                    require_evidence("2026-07-15-preview" in matches[0]["apiVersions"])
+                    require_evidence("2026-09-15-preview" in matches[0]["apiVersions"])
             providers.append(provider)
         search_usage = None
         if search:

@@ -38,7 +38,7 @@ locals {
     documentStore = "${local.rg_scope}/providers/Microsoft.DocumentDB/databaseAccounts/${azurerm_cosmosdb_account.foundry[0].name}"
     vectorStore   = "${local.rg_scope}/providers/Microsoft.Search/searchServices/${azurerm_search_service.foundry[0].name}"
   }
-  foundry_project_reference = "reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName')), '2026-07-15-preview'"
+  foundry_project_reference = "reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName')), '2026-09-15-preview'"
   foundry_template = {
     "$schema"      = "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
     contentVersion = "1.0.0.0"
@@ -59,7 +59,7 @@ locals {
     resources = [
       {
         type       = "Microsoft.CognitiveServices/accounts"
-        apiVersion = "2026-07-15-preview"
+        apiVersion = "2026-09-15-preview"
         name       = "[parameters('accountName')]"
         location   = var.location
         kind       = "AIServices"
@@ -80,7 +80,7 @@ locals {
       },
       {
         type       = "Microsoft.CognitiveServices/accounts/projects"
-        apiVersion = "2026-07-15-preview"
+        apiVersion = "2026-09-15-preview"
         name       = "[format('{0}/{1}', parameters('accountName'), parameters('projectName'))]"
         location   = var.location
         identity   = { type = "SystemAssigned" }

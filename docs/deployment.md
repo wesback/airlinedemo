@@ -145,6 +145,11 @@ reviewed Foundry Terraform topology. They refuse a plan without the exact
 `azurerm_resource_group_template_deployment.foundry[0]` account/project wrapper.
 Passing unit tests does not establish private service compatibility or policy
 compliance.
+The account/project wrapper pins `2026-09-15-preview`, preserving exact ARM-ID
+store bindings. The July preview rejected a documented Search resource ID
+during actual creation despite successful native validation. The newer preview
+is a compatibility candidate, not proof of a working deployment; do not replace
+store IDs with unverified names or reuse a partially applied saved plan.
 When fresh rebuild settings exist, Foundry planning uses that variable/backend
 pair rather than the previous deployment's saved settings. Missing members of
 the fresh pair stop planning instead of mixing old and new inputs.

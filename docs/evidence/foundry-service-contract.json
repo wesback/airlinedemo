@@ -288,16 +288,21 @@
     ],
     "capabilityProvider": "AzureRM 4.81.0 ARM-template deployment owns account/project capabilitySettings. No parallel legacy capability-host owner.",
     "capabilitySettingsSchemaCandidate": {
-      "apiVersion": "2026-07-15-preview",
-      "accountSource": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-07-15-preview/accounts",
-      "projectSource": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-07-15-preview/accounts/projects",
+      "apiVersion": "2026-09-15-preview",
+      "accountSource": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-09-15-preview/accounts",
+      "projectSource": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-09-15-preview/accounts/projects",
       "properties": {
         "capabilitySettings.blobStore": "Azure Storage account resource ID for agent files/artifacts",
         "capabilitySettings.documentStore": "Cosmos DB resource ID for agent runtime state",
         "capabilitySettings.vectorStore": "Azure AI Search resource ID for retrieval/indexing"
       },
       "projectMutability": "create time only; omitted fields inherit account defaults",
-      "state": "Exact preview ARM fields and official JSON schema verified. AzAPI 2.13.0 rejects this API version. Selected protected ARM-template route passes isolated provider validation and a mocked plan; private New-runtime support remains untested.",
+      "state": "September preview is advertised for account/project and its capability ARM-ID schema matches July. July actual creation rejected the documented vectorStore ID with LinkedInvalidPropertyId. September is a bounded compatibility candidate, not a verified live fix. Preserve full store IDs and closed-template/readback checks.",
+      "compatibilitySpecification": {
+        "source": "https://github.com/Azure/azure-rest-api-specs/blob/a146caa4569e6b690faea032d6e98571bd9d8eaf/specification/cognitiveservices/resource-manager/Microsoft.CognitiveServices/CognitiveServices/preview/2026-09-15-preview/cognitiveservices.json",
+        "result": "CapabilitySettings explicitly uses format arm-id and exact allowed resource types for blobStore, documentStore and vectorStore in both previews.",
+        "limitation": "Native validation and what-if did not detect the July write-time rejection; actual September provisioning and private runtime checks are required."
+      },
       "officialJsonSchema": {
         "source": "https://raw.githubusercontent.com/Azure/azure-resource-manager-schemas/main/schemas/2026-07-15-preview/Microsoft.CognitiveServices.json",
         "sha256": "627bf149f6663d7c2a176bfa9955abea01d39d929271dc3ea7e8e8c87fbd9e70",
