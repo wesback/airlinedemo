@@ -434,6 +434,47 @@ run "foundry_runtime_grants_use_exact_project_generated_scopes" {
   }
 }
 
+run "foundry_application_receives_exact_published_runtime_profile" {
+  command = plan
+  variables {
+    foundry_enabled          = true
+    image_digest             = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    demo_passcode_secret_uri = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
+    foundry_runtime_profile = {
+      copilot      = { name = "demo-copilot", version = "2", configuration_id = "1111111111111111111111111111111111111111111111111111111111111111" }
+      investigator = { name = "demo-investigator", version = "3", configuration_id = "2222222222222222222222222222222222222222222222222222222222222222" }
+    }
+  }
+  assert {
+    condition = tomap({ for entry in azurerm_container_app.app[0].template[0].container[0].env :
+      entry.name => entry.value if startswith(entry.name, "Foundry__")
+      }) == tomap({
+      Foundry__GatewayEndpoint                       = "https://gateway.private.invalid/foundry/projects/airline-demo"
+      Foundry__ProjectName                           = "airline-demo"
+      Foundry__Agents__copilot__Name                 = "demo-copilot"
+      Foundry__Agents__copilot__Version              = "2"
+      Foundry__Agents__copilot__ConfigurationId      = "1111111111111111111111111111111111111111111111111111111111111111"
+      Foundry__Agents__investigator__Name            = "demo-investigator"
+      Foundry__Agents__investigator__Version         = "3"
+      Foundry__Agents__investigator__ConfigurationId = "2222222222222222222222222222222222222222222222222222222222222222"
+    })
+    error_message = "The application must receive exactly both immutable agent tuples and the same-authority APIM project endpoint."
+  }
+}
+
+run "foundry_application_null_profile_remains_unconfigured" {
+  command = plan
+  variables {
+    foundry_enabled          = true
+    image_digest             = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    demo_passcode_secret_uri = "https://kv-demo-test.vault.azure.net/secrets/demo-passcode"
+  }
+  assert {
+    condition     = length([for entry in azurerm_container_app.app[0].template[0].container[0].env : entry.name if startswith(entry.name, "Foundry__")]) == 0
+    error_message = "Without a published runtime profile the application must not receive any Foundry configuration."
+  }
+}
+
 run "foundry_runtime_accepts_exact_existing_salted_agent_container" {
   command = plan
   variables {

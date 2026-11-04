@@ -1167,13 +1167,19 @@ class PrivateDeploymentTests(unittest.TestCase):
             def execute(script):
                 if "output -json" in script:
                     events.append("outputs")
-                    environment = dict(os.environ, SETUP_JSON=json.dumps(setup),
+                    environment = dict(os.environ, BACKEND_CONFIG_FILE=directory + "/backend.hcl",
+                                       INIT_MARKER=directory + "/initialized",
+                                       SETUP_JSON=json.dumps(setup),
                                        ALL_OUTPUTS_JSON=json.dumps({
                                            "sql_grants": {"value": "x" * 8192},
                                            "foundry_agent_setup": {"value": setup},
                                        }))
                     shell = """terraform() {
-  if [ "$*" = "-chdir=infra/terraform output -json foundry_agent_setup" ]; then
+  if [ "$2" = "init" ]; then
+    test "$*" = "-chdir=infra/terraform init -input=false -reconfigure -backend-config=$BACKEND_CONFIG_FILE"
+    touch "$INIT_MARKER"
+  elif [ "$*" = "-chdir=infra/terraform output -json foundry_agent_setup" ]; then
+    test -f "$INIT_MARKER"
     printf '%s' "$SETUP_JSON"
   else
     printf '%s' "$ALL_OUTPUTS_JSON"

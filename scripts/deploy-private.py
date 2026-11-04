@@ -690,7 +690,13 @@ terraform -chdir=infra/terraform apply -input=false "$plan"
 """)
 
     def foundry_agents(self):
-        setup = json.loads(self.execute("terraform -chdir=infra/terraform output -json foundry_agent_setup"))
+        setup = json.loads(self.execute("""if [ -d "$PWD/fresh-settings" ]; then
+  export BACKEND_CONFIG_FILE="$PWD/fresh-settings/backend.hcl"
+  test -r "$BACKEND_CONFIG_FILE"
+fi
+terraform -chdir=infra/terraform init -input=false -reconfigure -backend-config="$BACKEND_CONFIG_FILE" > /dev/null
+terraform -chdir=infra/terraform output -json foundry_agent_setup
+"""))
         if not isinstance(setup, dict):
             raise RuntimeError("foundry_agents_not_ready")
         publisher_resource_id = setup.get("publisher_identity_resource_id")
