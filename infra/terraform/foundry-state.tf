@@ -117,6 +117,8 @@ resource "azurerm_storage_account" "foundry" {
   }
   lifecycle {
     prevent_destroy = true
+    # Tenant security automation owns the Defender storage-scanner access links.
+    ignore_changes = [network_rules[0].private_link_access]
   }
 }
 

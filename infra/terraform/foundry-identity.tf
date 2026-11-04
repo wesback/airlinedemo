@@ -33,11 +33,11 @@ locals {
     search_data      = { scope = azurerm_search_service.foundry[0].id, role = "Search Index Data Contributor" }
     search_operator  = { scope = azurerm_search_service.foundry[0].id, role = "Search Service Contributor" }
     files = {
-      scope = try(local.foundry_store_scopes.containers.files.id, "")
+      scope = "${azurerm_storage_account.foundry[0].id}/blobServices/default/containers/${local.foundry_blob_containers.files}"
       role  = "Storage Blob Data Contributor"
     }
     agent_files = {
-      scope = try(local.foundry_store_scopes.containers.agent_files.id, "")
+      scope = "${azurerm_storage_account.foundry[0].id}/blobServices/default/containers/${local.foundry_blob_containers.agent_files}"
       role  = "Storage Blob Data Owner"
     }
     inference = { scope = local.foundry_account_id, role = "Cognitive Services OpenAI User" }
@@ -82,7 +82,7 @@ resource "azurerm_role_assignment" "foundry_runtime" {
     }
     precondition {
       condition = contains(["files", "agent_files"], each.key) ? (
-        each.value.scope == "${azurerm_storage_account.foundry[0].id}/blobServices/default/containers/${local.foundry_blob_containers[each.key]}" &&
+        each.value.scope == try(local.foundry_store_scopes.containers[each.key].id, "") &&
         try(local.foundry_store_scopes.containers[each.key].access, "") == "private"
       ) : true
       error_message = "Foundry Blob data grants require the exact existing private project container; missing or different service scopes are not replaced."
