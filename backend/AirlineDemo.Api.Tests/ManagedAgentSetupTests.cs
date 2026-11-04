@@ -81,6 +81,54 @@ public sealed class ManagedAgentSetupTests : IDisposable
         Assert.Equal(2, remote.CreateCalls);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Service_null_function_strict_reconciles_exact_versions_without_duplicate_posts(bool lostReply)
+    {
+        var remote = new FakeRemote
+        {
+            AddNullFunctionStrict = true,
+            LoseFirstCreateReplyAfterAccepting = lostReply,
+        };
+        var setup = Setup(remote);
+        if (lostReply)
+        {
+            var error = await Assert.ThrowsAsync<ManagedAgentSetupException>(() => setup.PublishAsync(Configuration()));
+            Assert.Equal("agent_create_outcome_uncertain", error.Code);
+        }
+
+        var manifest = await setup.PublishAsync(Configuration());
+        var repeated = await setup.PublishAsync(Configuration());
+
+        Assert.Equal(2, remote.CreateCalls);
+        Assert.Equal(manifest.ToJsonString(), repeated.ToJsonString());
+        Assert.Equal(["1", "2"], manifest["agents"]!.AsArray()
+            .Select(agent => agent!["version"]!.GetValue<string>()));
+        Assert.All(ManagedAgentSetup.Specifications(Configuration()), spec =>
+            Assert.Null(new FileManagedAgentPendingStore(Path.Combine(_directory, "state")).Read(spec.Name)));
+    }
+
+    [Theory]
+    [InlineData("strict", "false")]
+    [InlineData("strict", "true")]
+    [InlineData("unknown", "null")]
+    public async Task Non_null_strict_and_unknown_tool_fields_are_not_normalized(string field, string value)
+    {
+        var remote = new FakeRemote();
+        var spec = ManagedAgentSetup.Specifications(Configuration())[0];
+        var definition = spec.Definition.DeepClone().AsObject();
+        definition["tools"]![0]![field] = JsonNode.Parse(value);
+        remote.Seed(spec.Name, "1", definition);
+
+        var error = await Assert.ThrowsAsync<ManagedAgentSetupException>(() =>
+            Setup(remote).PublishAsync(Configuration()));
+
+        Assert.Equal("agent_definition_mismatch", error.Code);
+        Assert.Equal(0, remote.CreateCalls);
+        Assert.False(File.Exists(Configuration().ManifestPath));
+    }
+
     [Fact]
     public async Task Missing_filter_policy_refuses_publication_before_agent_creation()
     {
@@ -185,6 +233,7 @@ public sealed class ManagedAgentSetupTests : IDisposable
         public int CreateCalls { get; private set; }
         public bool LoseFirstCreateReplyAfterAccepting { get; init; }
         public bool LoseFirstCreateReplyWithoutAccepting { get; init; }
+        public bool AddNullFunctionStrict { get; init; }
 
         public Task<JsonObject> ListVersionsAsync(string name, string? after, CancellationToken cancellationToken)
         {
@@ -213,6 +262,11 @@ public sealed class ManagedAgentSetupTests : IDisposable
                 ["created_at"] = 1,
                 ["definition"] = request["definition"]!.DeepClone(),
             };
+            if (AddNullFunctionStrict)
+            {
+                foreach (var tool in created["definition"]!["tools"]!.AsArray().OfType<JsonObject>())
+                    tool["strict"] = null;
+            }
             if (!_versions.TryGetValue(name, out var existing))
                 _versions[name] = existing = [];
             existing.Add(created.DeepClone().AsObject());

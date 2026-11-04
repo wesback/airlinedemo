@@ -297,7 +297,7 @@ public sealed class ManagedAgentSetup(
         if (pending is not null && pending != spec.DefinitionSha256)
             throw new ManagedAgentSetupException("agent_definition_mismatch");
         var versions = await ReadAllVersionsAsync(spec.Name, cancellationToken);
-        var matches = versions.Where(agent => Hash(agent["definition"]!) == spec.DefinitionSha256).ToArray();
+        var matches = versions.Where(agent => MatchesDefinition(agent["definition"]!.AsObject(), spec)).ToArray();
         if (pending is not null)
         {
             if (matches.Length != 1)
@@ -415,8 +415,26 @@ public sealed class ManagedAgentSetup(
 
     private static bool Matches(JsonObject agent, ManagedAgentSpecification spec) =>
         MatchesName(agent, spec.Name) && agent["definition"] is JsonObject definition &&
-        Hash(definition) == spec.DefinitionSha256 && agent["object"]?.GetValue<string>() == "agent.version" &&
+        MatchesDefinition(definition, spec) && agent["object"]?.GetValue<string>() == "agent.version" &&
         VersionPattern.IsMatch(agent["version"]?.GetValue<string>() ?? "");
+
+    private static bool MatchesDefinition(JsonObject definition, ManagedAgentSpecification spec)
+    {
+        var comparable = definition.DeepClone().AsObject();
+        if (comparable["tools"] is JsonArray tools && spec.Definition["tools"] is JsonArray expectedTools &&
+            tools.Count == expectedTools.Count)
+        {
+            for (var index = 0; index < tools.Count; index++)
+            {
+                if (tools[index] is JsonObject tool && expectedTools[index] is JsonObject expected &&
+                    tool["type"]?.GetValue<string>() == "function" &&
+                    expected["type"]?.GetValue<string>() == "function" && !expected.ContainsKey("strict") &&
+                    tool.TryGetPropertyValue("strict", out var strict) && strict is null)
+                    tool.Remove("strict");
+            }
+        }
+        return Hash(comparable) == spec.DefinitionSha256;
+    }
 
     private static bool MatchesName(JsonObject agent, string name) =>
         agent["name"]?.GetValue<string>() == name;
