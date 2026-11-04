@@ -414,7 +414,7 @@ class PrivateDeploymentTests(unittest.TestCase):
         plan = {"planned_values": {"root_module": {"resources": [wrapper, search]}}, "resource_changes": []}
         self.assertEqual(search["values"], deployment.foundry_plan_fingerprint(plan, b"saved", "a" * 40)["search"])
 
-    def test_foundry_german_search_uses_saved_plan_region_and_rejects_missing_capacity(self):
+    def test_foundry_french_search_uses_saved_plan_region_and_rejects_missing_capacity(self):
         for scenario in ("available", "no-quota", "unsupported"):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
                 instance = self.foundry_executor(directory)
@@ -422,11 +422,11 @@ class PrivateDeploymentTests(unittest.TestCase):
                 candidate.update(startedAt=deployment.utc_now(), runId="current")
                 projection = json.loads(deployment.zlib.decompress(
                     deployment.base64.b64decode(instance.execute.return_value)))
-                projection["search"] = {"location": "germanywestcentral", "sku": "standard"}
+                projection["search"] = {"location": "francecentral", "sku": "standard"}
                 instance.execute.return_value = deployment.base64.b64encode(
                     deployment.zlib.compress(json.dumps(projection).encode())).decode()
                 if scenario != "unsupported":
-                    providers["Microsoft.Search"]["resourceTypes"][0]["locations"] = ["Germany West Central"]
+                    providers["Microsoft.Search"]["resourceTypes"][0]["locations"] = ["France Central"]
                 observed = []
 
                 def regional_cloud(*args, **kwargs):
@@ -444,21 +444,21 @@ class PrivateDeploymentTests(unittest.TestCase):
                             instance.foundry_discovery(candidate)
                 self.assertEqual([] if scenario == "unsupported" else [
                     "https://management.azure.com/subscriptions/" + instance.args.subscription_id +
-                    "/providers/Microsoft.Search/locations/germanywestcentral/usages?api-version=2025-05-01"], observed)
+                    "/providers/Microsoft.Search/locations/francecentral/usages?api-version=2025-05-01"], observed)
 
-    def test_german_price_meter_is_allowed_only_for_search(self):
+    def test_french_price_meter_is_allowed_only_for_search(self):
         for product in ("Azure AI Search", "Synthetic"):
             with self.subTest(product=product), tempfile.TemporaryDirectory() as directory:
                 instance = self.foundry_executor(directory)
                 candidate, _, _, _, page = self.foundry_cloud(instance)
                 meter = candidate["meterIds"][0]
                 candidate.update(startedAt=deployment.utc_now(), runId="current")
-                candidate["usage"][meter].update(region="germanywestcentral", productName=product)
-                page["Items"][0].update(armRegionName="germanywestcentral", productName=product)
+                candidate["usage"][meter].update(region="francecentral", productName=product)
+                page["Items"][0].update(armRegionName="francecentral", productName=product)
                 with patch.object(deployment, "urlopen", return_value=io.StringIO(json.dumps(page))) as prices:
                     if product == "Azure AI Search":
                         self.assertEqual(0.3, instance.foundry_quote(candidate)["estimatedCost"])
-                        self.assertEqual(["armRegionName eq 'germanywestcentral' and meterId eq '" + meter + "'"],
+                        self.assertEqual(["armRegionName eq 'francecentral' and meterId eq '" + meter + "'"],
                                          parse_qs(deployment.urlparse(prices.call_args.args[0]).query)["$filter"])
                     else:
                         with self.assertRaises(ValueError):

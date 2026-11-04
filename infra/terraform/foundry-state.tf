@@ -18,9 +18,9 @@ variable "foundry_state_profile" {
   validation {
     condition = var.foundry_state_profile == null ? true : (
       var.foundry_state_profile.search_location == null ||
-      contains(["swedencentral", "germanywestcentral"], var.foundry_state_profile.search_location)
+      contains(["swedencentral", "germanywestcentral", "francecentral"], var.foundry_state_profile.search_location)
     )
-    error_message = "Foundry Search location must be Sweden Central or Germany West Central."
+    error_message = "Foundry Search location must be Sweden Central, Germany West Central or France Central."
   }
   validation {
     condition     = !var.foundry_enabled || var.foundry_state_profile != null

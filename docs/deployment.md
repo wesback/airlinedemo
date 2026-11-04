@@ -150,7 +150,7 @@ pair rather than the previous deployment's saved settings. Missing members of
 the fresh pair stop planning instead of mixing old and new inputs.
 
 The optional `foundry_state_profile.search_location` selects `swedencentral`
-or `germanywestcentral`; omitting it preserves the application's region.
+or `germanywestcentral` or `francecentral`; omitting it preserves the application's region.
 This changes only Search: the Foundry account and its VNet remain together,
 and the Search private endpoint stays in that VNet's region. Planning checks
 the selected Search region's provider support and quota. Quota does not

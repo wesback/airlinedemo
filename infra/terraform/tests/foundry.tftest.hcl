@@ -1068,7 +1068,7 @@ run "foundry_rejects_missing_state_profile" {
   expect_failures = [var.foundry_state_profile]
 }
 
-run "foundry_search_in_germany_retains_swedish_private_topology" {
+run "foundry_search_in_france_retains_swedish_private_topology" {
   command = plan
   variables {
     foundry_enabled = true
@@ -1080,7 +1080,7 @@ run "foundry_search_in_germany_retains_swedish_private_topology" {
       search_sku                     = "standard"
       search_partitions              = 1
       search_replicas                = 1
-      search_location                = "germanywestcentral"
+      search_location                = "francecentral"
       storage_replication_type       = "LRS"
       blob_retention_days            = 7
       container_retention_days       = 7
@@ -1088,7 +1088,7 @@ run "foundry_search_in_germany_retains_swedish_private_topology" {
   }
   assert {
     condition = (
-      azurerm_search_service.foundry[0].location == "germanywestcentral" &&
+      azurerm_search_service.foundry[0].location == "francecentral" &&
       azurerm_search_service.foundry[0].sku == "standard" &&
       azurerm_search_service.foundry[0].public_network_access_enabled == false &&
       azurerm_search_service.foundry[0].local_authentication_enabled == false &&

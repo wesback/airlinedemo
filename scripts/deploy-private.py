@@ -410,7 +410,7 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
         providers = []
         search = fingerprint.get("search")
         search_region = search["location"] if search else self.args.location
-        require_evidence(search_region in ("swedencentral", "germanywestcentral"))
+        require_evidence(search_region in ("swedencentral", "germanywestcentral", "francecentral"))
         for namespace, types in (
                 ("Microsoft.CognitiveServices", ("accounts", "accounts/projects")),
                 ("Microsoft.DocumentDB", ("databaseAccounts",)),
@@ -516,7 +516,7 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
             usage = request["usage"][meter_id]
             region = usage.get("region", "swedencentral")
             require_evidence(region in ("swedencentral", "Global", "") or
-                             (region == "germanywestcentral" and usage["productName"] == "Azure AI Search"))
+                             (region in ("germanywestcentral", "francecentral") and usage["productName"] == "Azure AI Search"))
             url = "https://prices.azure.com/api/retail/prices?" + urlencode({
                 "currencyCode": "'USD'", "$filter": f"armRegionName eq '{region}' and meterId eq '{meter_id}'"})
             rows, seen = [], set()
