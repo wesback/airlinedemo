@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -169,13 +170,13 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
     internal sealed class ScriptedManagedProjectClient(IChatClient chat) : IManagedProjectClient
     {
         private const string ConfigurationId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        private readonly Dictionary<string, List<JsonObject>> _conversations = new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, List<JsonObject>> _conversations = new(StringComparer.Ordinal);
         private int _conversationId;
         private int _itemId;
         private int _responseId;
         public int ListCalls;
-        public List<string> ResponseWorkloads { get; } = [];
-        public List<ManagedAgentTarget> AgentTargets { get; } = [];
+        public ConcurrentQueue<string> ResponseWorkloads { get; } = new();
+        public ConcurrentQueue<ManagedAgentTarget> AgentTargets { get; } = new();
         public Func<CancellationToken, Task>? BeforeListAsync { get; set; }
         public Func<CancellationToken, Task>? AfterListAsync { get; set; }
 
@@ -184,7 +185,7 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
             if (workload is not ("copilot" or "investigator"))
                 throw new ManagedProjectException("managed_agent_unconfigured");
             var target = new ManagedAgentTarget($"{workload}-agent", "1", ConfigurationId);
-            AgentTargets.Add(target);
+            AgentTargets.Enqueue(target);
             return target;
         }
 
@@ -193,7 +194,7 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             var id = $"conversation-{Interlocked.Increment(ref _conversationId)}";
-            _conversations.Add(id, []);
+            _conversations.TryAdd(id, []);
             return Task.FromResult(new JsonObject { ["id"] = id });
         }
 
@@ -227,7 +228,7 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
         public async Task<JsonObject> CreateResponseAsync(string workload, string conversationId, JsonArray input,
             GatewayCorrelation correlation, CancellationToken cancellationToken)
         {
-            ResponseWorkloads.Add(workload);
+            ResponseWorkloads.Enqueue(workload);
             var target = Agent(workload);
             var history = _conversations[conversationId];
             foreach (var item in input)
