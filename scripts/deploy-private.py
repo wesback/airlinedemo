@@ -96,18 +96,30 @@ def foundry_plan_fingerprint(plan, plan_bytes, source_commit, scope=None):
                              for change in plan["resource_changes"]))
     wrapper = wrappers[0]
     require_evidence(wrapper["deployment_mode"] == "Incremental" and wrapper["debug_level"] == "none")
+
+    def model_profile(values):
+        return {"name": values["model"][0]["name"], "version": values["model"][0]["version"],
+                "sku": values["sku"][0]["name"], "capacity": values["sku"][0]["capacity"]}
+
+    changes = {row["address"]: row["change"] for row in plan["resource_changes"] if "address" in row}
+    retained = []
+    for resource in resources:
+        change = changes.get(resource["address"], {})
+        if resource.get("type") == "azurerm_cognitive_deployment" and change.get("actions") == ["no-op"]:
+            require_evidence(all(change["before"].get(key) == change["after"].get(key) ==
+                                 resource["values"].get(key) for key in ("id", "model", "sku")))
+            require_evidence(resource["values"]["model"][0]["format"] == "OpenAI")
+            retained.append({"deploymentId": resource["values"]["id"], "model": model_profile(resource["values"])})
     result = {
         "sourceCommit": source_commit,
         "planSha256": hashlib.sha256(plan_bytes).hexdigest(),
         "configurationSha256": canonical_sha256(plan["planned_values"]),
         "templateSha256": canonical_sha256(json.loads(wrapper["template_content"])),
         "parametersSha256": canonical_sha256(json.loads(wrapper["parameters_content"])),
-        "models": sorted([{"name": resource["values"]["model"][0]["name"],
-                           "version": resource["values"]["model"][0]["version"],
-                           "sku": resource["values"]["sku"][0]["name"],
-                           "capacity": resource["values"]["sku"][0]["capacity"]}
+        "models": sorted([model_profile(resource["values"])
                           for resource in resources if resource.get("type") == "azurerm_cognitive_deployment"],
                          key=canonical_sha256),
+        "retainedModels": sorted(retained, key=canonical_sha256),
     }
     if scope is not None:
         template, parameters = json.loads(wrapper["template_content"]), json.loads(wrapper["parameters_content"])
@@ -280,7 +292,7 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
             require_evidence(validation.get("error") is None)
             require_evidence(validation["properties"]["provisioningState"] == "Succeeded")
             what_if = az("deployment", "group", "what-if", *arguments, "--no-pretty-print",
-                         "--result-format", "FullResourcePayloads", private=True)
+                         "--result-format", "FullResourcePayloads", "--exclude-change-types", "Ignore", private=True)
             write_private(self.directory / "foundry-native-arm.json",
                           json.dumps({"runId": request["runId"], "validation": validation, "whatIf": what_if}))
             require_evidence(what_if["status"] == "Succeeded" and not what_if.get("error"))
@@ -337,7 +349,7 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
                              for row in skus))
         models = az("cognitiveservices", "model", "list", "--location", self.args.location, *subscription, private=True)
         usages = az("cognitiveservices", "usage", "list", "--location", self.args.location, *subscription, private=True)
-        required_quota = {}
+        required_quota, retained_readbacks = {}, []
         for required in request["models"]:
             matches = list({canonical_sha256(row["model"]): row["model"] for row in models
                             if row["model"]["name"] == required["name"]
@@ -361,7 +373,24 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
                 if capacity.get(bound) is not None:
                     require_evidence(comparison(evidence_number(capacity[bound])))
             if capacity.get("minimum") is None or capacity.get("step") is None:
-                require_evidence(value == evidence_number(capacity["default"], minimum=1))
+                if capacity.get("default") is None or value != evidence_number(capacity["default"], minimum=1):
+                    retained = [row for row in fingerprint.get("retainedModels", []) if row["model"] == required]
+                    require_evidence(len(retained) == sum(model == required for model in fingerprint["models"]))
+                    require_evidence(len({row["deploymentId"].lower() for row in retained}) == len(retained))
+                    for row in retained:
+                        deployment_id = row["deploymentId"]
+                        require_evidence(re.fullmatch(
+                            re.escape(scope) + r"/providers/Microsoft\.CognitiveServices/accounts/[A-Za-z0-9._-]+/deployments/[A-Za-z0-9._-]+",
+                            deployment_id, flags=re.IGNORECASE) is not None)
+                        live = az("resource", "show", "--ids", deployment_id, "--api-version", "2024-10-01",
+                                  *subscription, private=True)
+                        require_evidence(live["id"].lower() == deployment_id.lower())
+                        require_evidence(live["properties"]["provisioningState"] == "Succeeded")
+                        require_evidence({key: live["properties"]["model"][key] for key in ("format", "name", "version")} ==
+                                         {"format": "OpenAI", "name": required["name"], "version": required["version"]})
+                        require_evidence(live["sku"]["name"] == required["sku"] and
+                                         evidence_number(live["sku"]["capacity"], minimum=1) == value)
+                        retained_readbacks.append(live)
             else:
                 minimum, step = evidence_number(capacity["minimum"]), evidence_number(capacity["step"])
                 require_evidence(step > 0 and (value - minimum) % step == 0)
@@ -376,10 +405,11 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
             require_evidence(available >= evidence_number(requested["requested"]) > 0)
             quota.append({"name": name, **requested, "available": float(available)})
         raw = {"runId": request["runId"], "assignments": assignments, "inventory": inventory,
-               "providers": providers, "skus": skus, "models": models, "usages": usages}
+               "providers": providers, "skus": skus, "models": models, "usages": usages,
+               "retainedModels": retained_readbacks}
         write_private(self.directory / "foundry-discovery.json", json.dumps(raw, indent=2))
         return {"provider": {"status": "available", "sourceSha256": canonical_sha256(
-                    {"providers": providers, "skus": skus, "models": models})},
+                    {"providers": providers, "skus": skus, "models": models, "retainedModels": retained_readbacks})},
                 "quota": sorted(quota, key=lambda row: row["name"])}
 
     def foundry_quote(self, request):

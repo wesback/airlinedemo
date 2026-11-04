@@ -228,6 +228,15 @@ profile has exactly `runtime` and `judge`, each with `name`, pinned `version`,
 or upgraded automatically. These are configuration/evidence inputs, not new
 required Azure ID command arguments; automatic derivation remains unfinished.
 
+When the catalog omits capacity bounds, new deployments must use its explicit
+default. A retained deployment may keep a different capacity only when the saved
+plan proves an unchanged identity/model/SKU and live ARM readback confirms that
+exact successful deployment. Every deployment sharing that profile must qualify;
+a new deployment cannot borrow the exception. Catalog retirement, known bounds
+and full-plan quota checks still apply. Native what-if excludes only `Ignore`
+results; the two candidate resources remain mandatory and unexpected changes
+are rejected.
+
 Project runtime grants derive their principal and workspace identifier from
 read-only ARM outputs. After that deployment completes, a read-only Terraform
 module queries the actual Blob container IDs/ACLs and Cosmos database ID,

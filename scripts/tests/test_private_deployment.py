@@ -59,7 +59,8 @@ class PrivateDeploymentTests(unittest.TestCase):
                           "planSha256": deployment.hashlib.sha256(b"saved plan").hexdigest(),
                           "configurationSha256": deployment.canonical_sha256(plan["planned_values"]),
                           "templateSha256": deployment.canonical_sha256(template),
-                          "parametersSha256": deployment.canonical_sha256(parameters), "models": []}, result)
+                          "parametersSha256": deployment.canonical_sha256(parameters),
+                          "models": [], "retainedModels": []}, result)
         for path, value in ((("resource_changes", 0, "change", "actions"), ["delete", "create"]),
                             (("planned_values", "root_module", "resources"), []),
                             (("planned_values", "root_module", "resources", 0, "values", "deployment_mode"), "Complete"),
@@ -82,10 +83,24 @@ class PrivateDeploymentTests(unittest.TestCase):
             deployment.foundry_plan_fingerprint(plan, b"saved plan", "a" * 40, scope)
         plan["planned_values"]["root_module"]["resources"].append({
             "address": "azurerm_cognitive_deployment.synthetic", "type": "azurerm_cognitive_deployment",
-            "values": {"model": [{"name": "synthetic-model", "version": "2026-01-01"}],
+            "values": {"model": [{"format": "OpenAI", "name": "synthetic-model", "version": "2026-01-01"}],
                        "sku": [{"name": "Standard", "capacity": 2}]}})
         self.assertEqual([{"name": "synthetic-model", "version": "2026-01-01", "sku": "Standard", "capacity": 2}],
                          deployment.foundry_plan_fingerprint(plan, b"saved plan", "a" * 40)["models"])
+        model = plan["planned_values"]["root_module"]["resources"][-1]
+        model["values"]["id"] = "/synthetic/deployments/retained"
+        plan["resource_changes"] = [{"address": model["address"], "change": {
+            "actions": ["no-op"], "before": copy.deepcopy(model["values"]), "after": copy.deepcopy(model["values"])}}]
+        self.assertEqual([{"deploymentId": model["values"]["id"],
+                           "model": {"name": "synthetic-model", "version": "2026-01-01", "sku": "Standard", "capacity": 2}}],
+                         deployment.foundry_plan_fingerprint(plan, b"saved plan", "a" * 40)["retainedModels"])
+        for action in ("create", "update"):
+            plan["resource_changes"][0]["change"]["actions"] = [action]
+            self.assertEqual([], deployment.foundry_plan_fingerprint(plan, b"saved plan", "a" * 40)["retainedModels"])
+        plan["resource_changes"][0]["change"]["actions"] = ["no-op"]
+        plan["resource_changes"][0]["change"]["after"]["sku"][0]["capacity"] = 3
+        with self.assertRaises(ValueError):
+            deployment.foundry_plan_fingerprint(plan, b"saved plan", "a" * 40)
 
     def test_foundry_plan_evidence_roundtrips_complete_candidate_through_output_limit(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -159,13 +174,15 @@ class PrivateDeploymentTests(unittest.TestCase):
             self.assertEqual(("deployment", "group", "validate"), az.call_args_list[0].args[:3])
             self.assertEqual(("deployment", "group", "what-if"), az.call_args_list[1].args[:3])
             self.assertIn("Incremental", az.call_args.args)
+            self.assertEqual("Ignore", az.call_args.args[az.call_args.args.index("--exclude-change-types") + 1])
             self.assertEqual(0o600, (instance.directory / "foundry-native-arm.json").stat().st_mode & 0o777)
             self.assertFalse(any(instance.directory.glob("foundry-arm-*")))
-            for change_type, resource_id in (("Delete", account_id), ("Unsupported", account_id),
+            for change_type, resource_id in (("Delete", account_id), ("Unsupported", account_id), ("Ignore", account_id),
                                              ("Modify", scope + "/unrelated")):
                 with self.subTest(change_type=change_type, resource_id=resource_id):
-                    az.side_effect = [validation, {"status": "Succeeded", "changes": [
-                        {"resourceId": resource_id, "changeType": change_type}]}]
+                    changes = copy.deepcopy(what_if["changes"])
+                    changes[0] = {"resourceId": resource_id, "changeType": change_type}
+                    az.side_effect = [validation, {"status": "Succeeded", "changes": changes}]
                     with self.assertRaises(ValueError):
                         instance.foundry_arm_evidence(request)
                     instance.execute.assert_not_called()
@@ -376,6 +393,72 @@ class PrivateDeploymentTests(unittest.TestCase):
                 result = instance.foundry_discovery(candidate)
             self.assertEqual([{"name": "model", "unit": "Count", "requested": 4, "available": 4.0}],
                              result["quota"])
+
+    def test_foundry_discovery_verifies_exact_retained_nondefault_capacity_and_refuses_drift(self):
+        for scenario in ("valid", "missing-default", "id", "state", "format", "name", "version", "sku", "capacity",
+                         "same-profile-create", "foreign-scope", "duplicate-identity"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                instance = self.foundry_executor(directory)
+                candidate, sources, _, cloud, _ = self.foundry_cloud(instance)
+                sources["model"][0]["model"]["skus"][0]["capacity"] = {
+                    "minimum": None, "maximum": 10, "step": None, "default": 1}
+                if scenario == "missing-default":
+                    sources["model"][0]["model"]["skus"][0]["capacity"]["default"] = None
+                deployment_id = ("/subscriptions/" + instance.args.subscription_id +
+                                 "/resourceGroups/rg-demo1/providers/Microsoft.CognitiveServices/accounts/retained/deployments/model")
+                retained = {"deploymentId": deployment_id, "model": copy.deepcopy(candidate["models"][0])}
+                projection = json.loads(deployment.zlib.decompress(deployment.base64.b64decode(instance.execute.return_value)))
+                projection["retainedModels"] = [retained]
+                live = {"id": deployment_id, "properties": {"provisioningState": "Succeeded",
+                        "model": {"format": "OpenAI", "name": "synthetic-model", "version": "2026-01-01"}},
+                        "sku": {"name": "Standard", "capacity": 2}}
+                if scenario == "id":
+                    live["id"] += "-other"
+                elif scenario == "state":
+                    live["properties"]["provisioningState"] = "Failed"
+                elif scenario in ("format", "name", "version"):
+                    live["properties"]["model"][scenario] = "different"
+                elif scenario == "sku":
+                    live["sku"]["name"] = "different"
+                elif scenario == "capacity":
+                    live["sku"]["capacity"] = 3
+                elif scenario in ("same-profile-create", "duplicate-identity"):
+                    candidate["models"].append(copy.deepcopy(candidate["models"][0]))
+                    projection["models"] = candidate["models"]
+                    candidate["quotaRequests"]["model"]["requested"] = 4
+                    sources["usage"][0]["limit"] = 10
+                    if scenario == "duplicate-identity":
+                        projection["retainedModels"].append(copy.deepcopy(retained))
+                elif scenario == "foreign-scope":
+                    retained["deploymentId"] = deployment_id.replace("/rg-demo1/", "/other/")
+                instance.execute.return_value = deployment.base64.b64encode(
+                    deployment.zlib.compress(json.dumps(projection).encode())).decode()
+                candidate.update(startedAt=deployment.utc_now(), runId="current-run")
+
+                def current_cloud(*args, **kwargs):
+                    return copy.deepcopy(live) if args[:2] == ("resource", "show") else cloud(*args, **kwargs)
+
+                with patch.object(deployment, "az", side_effect=current_cloud) as az:
+                    if scenario in ("valid", "missing-default"):
+                        result = instance.foundry_discovery(candidate)
+                        self.assertEqual([{"name": "model", "unit": "Count", "requested": 2, "available": 3.0}],
+                                         result["quota"])
+                        raw = json.loads((instance.directory / "foundry-discovery.json").read_text())
+                        self.assertEqual([live], raw["retainedModels"])
+                        self.assertEqual(deployment.canonical_sha256(
+                            {name: raw[name] for name in ("providers", "skus", "models", "retainedModels")}),
+                            result["provider"]["sourceSha256"])
+                    else:
+                        with self.assertRaises(ValueError):
+                            instance.foundry_discovery(candidate)
+                        self.assertFalse((instance.directory / "foundry-discovery.json").exists())
+                reads = [call for call in az.call_args_list if call.args[:2] == ("resource", "show")]
+                self.assertEqual(0 if scenario in ("same-profile-create", "foreign-scope", "duplicate-identity") else 1,
+                                 len(reads))
+                if reads:
+                    self.assertEqual(deployment_id, reads[0].args[reads[0].args.index("--ids") + 1])
+                self.assertEqual(1, instance.execute.call_count)
+                self.assertNotIn(" apply ", instance.execute.call_args.args[0])
 
     @patch.object(deployment, "run", return_value="a" * 40)
     def test_foundry_discovery_refuses_unknown_sources_before_prices_assessment_or_apply(self, run):
