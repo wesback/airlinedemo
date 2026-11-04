@@ -2,7 +2,7 @@ locals {
   foundry_project_outputs = jsondecode(local.foundry_state_count == 0 ? "{}" : azurerm_resource_group_template_deployment.foundry[0].output_content)
   foundry_principal_id    = try(local.foundry_project_outputs.projectPrincipalId.value, "")
   foundry_internal_id     = try(local.foundry_project_outputs.projectInternalId.value, "")
-  foundry_store_scopes    = try(local.foundry_project_outputs.projectStoreScopes.value, {})
+  foundry_store_scopes    = try(module.foundry_store_readback[0].scopes, {})
   foundry_identity_valid = (
     can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", local.foundry_principal_id)) &&
     can(regex("^[0-9a-fA-F]{32}$", local.foundry_internal_id))
@@ -42,6 +42,17 @@ locals {
   }
 }
 
+module "foundry_store_readback" {
+  source              = "./modules/foundry-store-readback"
+  count               = local.foundry_state_count
+  containers          = local.foundry_blob_containers
+  storage_account_id  = azurerm_storage_account.foundry[0].id
+  cosmos_account_name = azurerm_cosmosdb_account.foundry[0].name
+  resource_group_name = azurerm_resource_group.demo.name
+
+  depends_on = [azurerm_resource_group_template_deployment.foundry]
+}
+
 resource "azurerm_role_assignment" "foundry_runtime" {
   for_each             = local.foundry_runtime_grants
   scope                = each.value.scope
@@ -57,7 +68,7 @@ resource "azurerm_role_assignment" "foundry_runtime" {
     precondition {
       condition = contains(["files", "agent_files"], each.key) ? (
         each.value.scope == "${azurerm_storage_account.foundry[0].id}/blobServices/default/containers/${local.foundry_blob_containers[each.key]}" &&
-        try(local.foundry_store_scopes.containers[each.key].access, "") == "None"
+        try(local.foundry_store_scopes.containers[each.key].access, "") == "private"
       ) : true
       error_message = "Foundry Blob data grants require the exact existing private project container; missing or different service scopes are not replaced."
     }

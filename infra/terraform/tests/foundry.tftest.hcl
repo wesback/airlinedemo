@@ -5,19 +5,6 @@ mock_provider "azurerm" {
       output_content = jsonencode({
         projectPrincipalId = { value = "66666666-6666-6666-6666-666666666666" }
         projectInternalId  = { value = "0123456789abcdef0123456789abcdef" }
-        projectStoreScopes = { value = {
-          containers = {
-            files = {
-              id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
-              access = "None"
-            }
-            agent_files = {
-              id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
-              access = "None"
-            }
-          }
-          cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
-        } }
       })
     }
   }
@@ -111,6 +98,25 @@ mock_provider "azuread" {
 }
 mock_provider "random" {}
 
+override_module {
+  target = module.foundry_store_readback[0]
+  outputs = {
+    scopes = {
+      containers = {
+        files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
+          access = "private"
+        }
+        agent_files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
+          access = "private"
+        }
+      }
+      cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
+    }
+  }
+}
+
 variables {
   name_prefix                           = "demo1"
   resource_group_name                   = "rg-demo-test"
@@ -188,6 +194,7 @@ run "foundry_account_project_are_private_injected_and_single_owned" {
         projectName = { value = "airline-demo" }
       } &&
       length(local.foundry_template.resources) == 2 &&
+      toset(keys(local.foundry_template.outputs)) == toset(["projectPrincipalId", "projectInternalId"]) &&
       [for resource in local.foundry_template.resources : resource.type] ==
       ["Microsoft.CognitiveServices/accounts", "Microsoft.CognitiveServices/accounts/projects"] &&
       alltrue([for resource in local.foundry_template.resources :
@@ -234,6 +241,56 @@ run "foundry_account_project_are_private_injected_and_single_owned" {
       local.foundry_account_id != azurerm_cognitive_account.model.id
     )
     error_message = "Foundry needs its own private account endpoint with all three namespaces; the retained legacy model is separate."
+  }
+}
+
+run "foundry_store_readback_uses_ARM_containers_and_service_database" {
+  command = plan
+  module {
+    source = "./modules/foundry-store-readback"
+  }
+  variables {
+    containers = {
+      files       = "01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
+      agent_files = "01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
+    }
+    storage_account_id  = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest"
+    cosmos_account_name = "cosmos-foundry"
+  }
+  override_data {
+    target = data.azurerm_storage_container.project["files"]
+    values = {
+      id                    = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
+      container_access_type = "private"
+    }
+  }
+  override_data {
+    target = data.azurerm_storage_container.project["agent_files"]
+    values = {
+      id                    = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
+      container_access_type = "private"
+    }
+  }
+  override_data {
+    target = data.azurerm_cosmosdb_sql_database.project
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
+    }
+  }
+  assert {
+    condition = (
+      alltrue([for key, container in data.azurerm_storage_container.project :
+        container.name == var.containers[key] &&
+        container.storage_account_id == var.storage_account_id &&
+        container.storage_account_name == null &&
+        output.scopes.containers[key].id == "${var.storage_account_id}/blobServices/default/containers/${var.containers[key]}" &&
+      output.scopes.containers[key].access == "private"]) &&
+      data.azurerm_cosmosdb_sql_database.project.account_name == "cosmos-foundry" &&
+      data.azurerm_cosmosdb_sql_database.project.resource_group_name == "rg-demo-test" &&
+      data.azurerm_cosmosdb_sql_database.project.name == "enterprise_memory" &&
+      output.scopes.cosmosDatabaseId == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
+    )
+    error_message = "Readback must use exact ARM account/container names and pass through discovered IDs/private ACLs without creating stores."
   }
 }
 
@@ -512,22 +569,17 @@ run "foundry_rejects_missing_discovered_blob_scope" {
   variables {
     foundry_enabled = true
   }
-  override_resource {
-    target          = azurerm_resource_group_template_deployment.foundry[0]
-    override_during = plan
-    values = { output_content = jsonencode({
-      projectPrincipalId = { value = "66666666-6666-6666-6666-666666666666" }
-      projectInternalId  = { value = "0123456789abcdef0123456789abcdef" }
-      projectStoreScopes = { value = {
-        containers = {
-          agent_files = {
-            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
-            access = "None"
-          }
+  override_module {
+    target = module.foundry_store_readback[0]
+    outputs = { scopes = {
+      containers = {
+        agent_files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
+          access = "private"
         }
-        cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
-      } }
-    }) }
+      }
+      cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
+    } }
   }
   expect_failures = [azurerm_role_assignment.foundry_runtime["files"]]
 }
@@ -537,26 +589,21 @@ run "foundry_rejects_another_project_blob_scope" {
   variables {
     foundry_enabled = true
   }
-  override_resource {
-    target          = azurerm_resource_group_template_deployment.foundry[0]
-    override_during = plan
-    values = { output_content = jsonencode({
-      projectPrincipalId = { value = "66666666-6666-6666-6666-666666666666" }
-      projectInternalId  = { value = "0123456789abcdef0123456789abcdef" }
-      projectStoreScopes = { value = {
-        containers = {
-          files = {
-            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/another-project-azureml-blobstore"
-            access = "None"
-          }
-          agent_files = {
-            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
-            access = "None"
-          }
+  override_module {
+    target = module.foundry_store_readback[0]
+    outputs = { scopes = {
+      containers = {
+        files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/another-project-azureml-blobstore"
+          access = "private"
         }
-        cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
-      } }
-    }) }
+        agent_files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
+          access = "private"
+        }
+      }
+      cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
+    } }
   }
   expect_failures = [azurerm_role_assignment.foundry_runtime["files"]]
 }
@@ -566,26 +613,21 @@ run "foundry_rejects_public_discovered_blob_container" {
   variables {
     foundry_enabled = true
   }
-  override_resource {
-    target          = azurerm_resource_group_template_deployment.foundry[0]
-    override_during = plan
-    values = { output_content = jsonencode({
-      projectPrincipalId = { value = "66666666-6666-6666-6666-666666666666" }
-      projectInternalId  = { value = "0123456789abcdef0123456789abcdef" }
-      projectStoreScopes = { value = {
-        containers = {
-          files = {
-            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
-            access = "Blob"
-          }
-          agent_files = {
-            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
-            access = "None"
-          }
+  override_module {
+    target = module.foundry_store_readback[0]
+    outputs = { scopes = {
+      containers = {
+        files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
+          access = "blob"
         }
-        cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
-      } }
-    }) }
+        agent_files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
+          access = "private"
+        }
+      }
+      cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
+    } }
   }
   expect_failures = [azurerm_role_assignment.foundry_runtime["files"]]
 }
@@ -595,26 +637,21 @@ run "foundry_rejects_another_discovered_cosmos_database" {
   variables {
     foundry_enabled = true
   }
-  override_resource {
-    target          = azurerm_resource_group_template_deployment.foundry[0]
-    override_during = plan
-    values = { output_content = jsonencode({
-      projectPrincipalId = { value = "66666666-6666-6666-6666-666666666666" }
-      projectInternalId  = { value = "0123456789abcdef0123456789abcdef" }
-      projectStoreScopes = { value = {
-        containers = {
-          files = {
-            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
-            access = "None"
-          }
-          agent_files = {
-            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
-            access = "None"
-          }
+  override_module {
+    target = module.foundry_store_readback[0]
+    outputs = { scopes = {
+      containers = {
+        files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
+          access = "private"
         }
-        cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/another_database"
-      } }
-    }) }
+        agent_files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
+          access = "private"
+        }
+      }
+      cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/another_database"
+    } }
   }
   expect_failures = [azurerm_cosmosdb_sql_role_assignment.foundry_runtime[0]]
 }
@@ -883,26 +920,21 @@ run "foundry_state_is_private_keyless_and_explicitly_sized" {
   variables {
     foundry_enabled = true
   }
-  override_resource {
-    target          = azurerm_resource_group_template_deployment.foundry[0]
-    override_during = plan
-    values = { output_content = jsonencode({
-      projectPrincipalId = { value = "66666666-6666-6666-6666-666666666666" }
-      projectInternalId  = { value = "0123456789abcdef0123456789abcdef" }
-      projectStoreScopes = { value = {
-        containers = {
-          files = {
-            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stfoundrytest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
-            access = "None"
-          }
-          agent_files = {
-            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stfoundrytest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
-            access = "None"
-          }
+  override_module {
+    target = module.foundry_store_readback[0]
+    outputs = { scopes = {
+      containers = {
+        files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stfoundrytest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
+          access = "private"
         }
-        cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
-      } }
-    }) }
+        agent_files = {
+          id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stfoundrytest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
+          access = "private"
+        }
+      }
+      cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
+    } }
   }
   override_resource {
     target          = azurerm_storage_account.foundry[0]

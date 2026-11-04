@@ -28,7 +28,7 @@ class PrivateDeploymentTests(unittest.TestCase):
             "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
             "contentVersion": "1.0.0.0",
             "parameters": {"accountName": {"type": "string"}, "projectName": {"type": "string"}},
-            "outputs": deployment.foundry_template_outputs(settings),
+            "outputs": deployment.foundry_template_outputs(),
             "resources": [
                 {"type": "Microsoft.CognitiveServices/accounts", "apiVersion": "2026-07-15-preview",
                  "name": "[parameters('accountName')]", "location": "swedencentral",
@@ -98,6 +98,12 @@ class PrivateDeploymentTests(unittest.TestCase):
                 "values": {"resource_group_name": "rg-demo1", "deployment_mode": "Incremental",
                            "debug_level": "none", "template_content": json.dumps(template),
                            "parameters_content": json.dumps(parameters)}}]}}, "resource_changes": []}
+            plan["planned_values"]["root_module"]["resources"].extend({
+                "address": "azurerm_cognitive_deployment.synthetic_" + str(index),
+                "type": "azurerm_cognitive_deployment",
+                "values": {"model": [{"name": "synthetic-" + str(index), "version": "2026-01-01"}],
+                           "sku": [{"name": "Standard", "capacity": 1}]}
+            } for index in range(40))
             expected = deployment.foundry_plan_fingerprint(plan, b"saved plan", "a" * 40, scope)
             self.assertGreater(len(json.dumps(expected).encode()), 4096)
             temporary_file = tempfile.NamedTemporaryFile
@@ -194,20 +200,16 @@ class PrivateDeploymentTests(unittest.TestCase):
                         instance.foundry_arm_evidence(changed)
                     az.assert_not_called()
 
-            for path, value in ((("containers", "files", "id"), "[parameters('accountName')]"),
-                                (("containers", "agent_files", "access"), "None"),
-                                (("cosmosDatabaseId",), "[listKeys('unapproved', '2024-08-15')]")):
-                with self.subTest(scope_output=path):
-                    changed = copy.deepcopy(request)
-                    target = changed["template"]["outputs"]["projectStoreScopes"]["value"]
-                    for part in path[:-1]:
-                        target = target[part]
-                    target[path[-1]] = value
-                    changed["bindings"]["templateSha256"] = deployment.canonical_sha256(changed["template"])
-                    az.reset_mock()
-                    with self.assertRaises(ValueError):
-                        instance.foundry_arm_evidence(changed)
-                    az.assert_not_called()
+            self.assertEqual({"projectPrincipalId", "projectInternalId"}, set(template["outputs"]))
+            changed = copy.deepcopy(request)
+            changed["template"]["outputs"]["projectStoreScopes"] = {"type": "object", "value": {
+                "containers": {"files": {"id": "[parameters('accountName')]", "access": "None"}},
+                "cosmosDatabaseId": "[listKeys('unapproved', '2024-08-15')]"}}
+            changed["bindings"]["templateSha256"] = deployment.canonical_sha256(changed["template"])
+            az.reset_mock()
+            with self.assertRaises(ValueError):
+                instance.foundry_arm_evidence(changed)
+            az.assert_not_called()
 
     def foundry_cloud(self, instance):
         candidate = self.foundry_candidate()

@@ -229,10 +229,13 @@ or upgraded automatically. These are configuration/evidence inputs, not new
 required Azure ID command arguments; automatic derivation remains unfinished.
 
 Project runtime grants derive their principal and workspace identifier from
-read-only ARM outputs. A third output reads the actual Blob container IDs/ACLs
-and Cosmos database ID, without provisioning or taking ownership of them.
+read-only ARM outputs. After that deployment completes, a read-only Terraform
+module queries the actual Blob container IDs/ACLs and Cosmos database ID,
+without provisioning or taking ownership of them. The Blob data source uses
+`storage_account_id` for management-plane readback, not legacy data-plane lookup.
 Blob data rights require the exact project containers with public access
-`None`; Cosmos data rights require the exact `enterprise_memory` database.
+`private` (the provider's normalized `None`); Cosmos data rights require the
+exact `enterprise_memory` database.
 Missing, malformed, foreign or public readbacks stop grants instead of using
 account-wide data scope.
 Separate publisher/evaluator managed identities receive project-scoped custom

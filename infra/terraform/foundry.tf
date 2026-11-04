@@ -39,14 +39,6 @@ locals {
     vectorStore   = "${local.rg_scope}/providers/Microsoft.Search/searchServices/${azurerm_search_service.foundry[0].name}"
   }
   foundry_project_reference = "reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName')), '2026-07-15-preview'"
-  foundry_workspace_reference = "toLower(format('{0}-{1}-{2}-{3}-{4}', ${join(", ", [
-    for part in [[0, 8], [8, 4], [12, 4], [16, 4], [20, 12]] :
-    "substring(${local.foundry_project_reference}).internalId, ${part[0]}, ${part[1]})"
-  ])}))"
-  foundry_container_references = {
-    for key, suffix in { files = "-azureml-blobstore", agent_files = "-azureml-agent" } :
-    key => "reference(concat('${try(local.foundry_stores.blobStore, "")}/blobServices/default/containers/', ${local.foundry_workspace_reference}, '${suffix}'), '2025-08-01', 'Full')"
-  }
   foundry_template = {
     "$schema"      = "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
     contentVersion = "1.0.0.0"
@@ -62,18 +54,6 @@ locals {
       projectInternalId = {
         type  = "string"
         value = "[${local.foundry_project_reference}).internalId]"
-      }
-      projectStoreScopes = {
-        type = "object"
-        value = {
-          containers = {
-            for key, reference in local.foundry_container_references : key => {
-              id     = "[${reference}.id]"
-              access = "[${reference}.properties.publicAccess]"
-            }
-          }
-          cosmosDatabaseId = "[reference('${try(local.foundry_stores.documentStore, "")}/sqlDatabases/enterprise_memory', '2024-08-15', 'Full').id]"
-        }
       }
     }
     resources = [

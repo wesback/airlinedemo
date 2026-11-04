@@ -117,21 +117,11 @@ def foundry_plan_fingerprint(plan, plan_bytes, source_commit, scope=None):
     return result
 
 
-def foundry_template_outputs(stores):
+def foundry_template_outputs():
     reference = "reference(resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName')), '2026-07-15-preview'"
-    parts = ", ".join(f"substring({reference}).internalId, {start}, {length})"
-                      for start, length in ((0, 8), (8, 4), (12, 4), (16, 4), (20, 12)))
-    workspace = "toLower(format('{0}-{1}-{2}-{3}-{4}', " + parts + "))"
-    containers = {}
-    for key, suffix in (("files", "-azureml-blobstore"), ("agent_files", "-azureml-agent")):
-        container = f"reference(concat('{stores['blobStore']}/blobServices/default/containers/', {workspace}, '{suffix}'), '2025-08-01', 'Full')"
-        containers[key] = {"id": f"[{container}.id]", "access": f"[{container}.properties.publicAccess]"}
     return {
         "projectPrincipalId": {"type": "string", "value": "[" + reference + ", 'Full').identity.principalId]"},
         "projectInternalId": {"type": "string", "value": "[" + reference + ").internalId]"},
-        "projectStoreScopes": {"type": "object", "value": {
-            "containers": containers,
-            "cosmosDatabaseId": f"[reference('{stores['documentStore']}/sqlDatabases/enterprise_memory', '2024-08-15', 'Full').id]"}},
     }
 
 
@@ -170,7 +160,7 @@ def validate_foundry_template(template, parameters, scope):
     for key, provider in expected_stores.items():
         require_evidence(re.fullmatch(re.escape(scope + "/providers/" + provider) + r"/[A-Za-z0-9._-]+",
                                      properties["capabilitySettings"][key]) is not None)
-    require_evidence(template["outputs"] == foundry_template_outputs(properties["capabilitySettings"]))
+    require_evidence(template["outputs"] == foundry_template_outputs())
     require_evidence(len(properties["networkInjections"]) == 1)
     injection = properties["networkInjections"][0]
     require_evidence(set(injection) == {"scenario", "subnetArmId", "useMicrosoftManagedNetwork"})
