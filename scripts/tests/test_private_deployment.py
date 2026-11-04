@@ -1,5 +1,6 @@
 import importlib.util
 import copy
+import contextlib
 import io
 import json
 import os
@@ -85,6 +86,47 @@ class PrivateDeploymentTests(unittest.TestCase):
                        "sku": [{"name": "Standard", "capacity": 2}]}})
         self.assertEqual([{"name": "synthetic-model", "version": "2026-01-01", "sku": "Standard", "capacity": 2}],
                          deployment.foundry_plan_fingerprint(plan, b"saved plan", "a" * 40)["models"])
+
+    def test_foundry_plan_evidence_roundtrips_complete_candidate_through_output_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instance = self.foundry_executor(directory)
+            instance.app_rg = "rg-demo1"
+            scope = "/subscriptions/" + instance.args.subscription_id + "/resourceGroups/rg-demo1"
+            template, parameters = self.foundry_template(scope)
+            plan = {"planned_values": {"root_module": {"resources": [{
+                "address": "azurerm_resource_group_template_deployment.foundry[0]",
+                "values": {"resource_group_name": "rg-demo1", "deployment_mode": "Incremental",
+                           "debug_level": "none", "template_content": json.dumps(template),
+                           "parameters_content": json.dumps(parameters)}}]}}, "resource_changes": []}
+            expected = deployment.foundry_plan_fingerprint(plan, b"saved plan", "a" * 40, scope)
+            self.assertGreater(len(json.dumps(expected).encode()), 4096)
+            temporary_file = tempfile.NamedTemporaryFile
+
+            def execute(script):
+                producer = script.split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+                output = io.StringIO()
+                with patch("runpy.run_path", return_value={
+                    "foundry_plan_fingerprint": deployment.foundry_plan_fingerprint,
+                    "require_evidence": deployment.require_evidence
+                }), patch("pathlib.Path.read_bytes", return_value=b"saved plan"), \
+                        patch("tempfile.NamedTemporaryFile", side_effect=lambda **kwargs: temporary_file(
+                            dir=directory, prefix=kwargs["prefix"])), \
+                        patch("subprocess.check_output", side_effect=[json.dumps(plan).encode(), "a" * 40]), \
+                        contextlib.redirect_stdout(output):
+                    exec(compile(producer, "<saved-plan-producer>", "exec"), {})
+                return output.getvalue()[-4096:]
+
+            instance.execute.side_effect = execute
+            self.assertEqual(expected, instance.foundry_plan_evidence(candidate=True))
+
+    def test_foundry_plan_evidence_refuses_invalid_or_truncated_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instance = self.foundry_executor(directory)
+            for output in ("not-base64", "eJw=", "x" * 4097):
+                with self.subTest(output_length=len(output)):
+                    instance.execute.return_value = output
+                    with self.assertRaisesRegex(RuntimeError, "^foundry_plan_evidence_invalid$"):
+                        instance.foundry_plan_evidence()
 
     @patch.object(deployment, "az")
     def test_foundry_native_arm_verifies_only_the_exact_closed_candidate(self, az):
@@ -182,10 +224,10 @@ class PrivateDeploymentTests(unittest.TestCase):
         candidate.update(meterIds=[meter], meterSkus={meter: "Standard"},
                          usage={meter: {"unit": "1 Hour", "productName": "Synthetic", "quantity": 3,
                                         "usageAssumption": "three additional synthetic instance hours"}})
-        instance.execute.return_value = json.dumps({
+        instance.execute.return_value = deployment.base64.b64encode(deployment.zlib.compress(json.dumps({
             **{name: candidate["bindings"][name] for name in
                ("sourceCommit", "configurationSha256", "planSha256", "templateSha256", "parametersSha256")},
-            "models": candidate["models"]})
+            "models": candidate["models"]}).encode())).decode()
         providers = {}
         for namespace, names in (("Microsoft.CognitiveServices", ["accounts", "accounts/projects"]),
                                  ("Microsoft.Storage", ["storageAccounts"]),
@@ -303,9 +345,10 @@ class PrivateDeploymentTests(unittest.TestCase):
                     candidate["models"][0]["capacity"] = 1.5 if scenario == "fractional" else 0
                 else:
                     candidate["models"].append(copy.deepcopy(candidate["models"][0]))
-                projection = json.loads(instance.execute.return_value)
+                projection = json.loads(deployment.zlib.decompress(deployment.base64.b64decode(instance.execute.return_value)))
                 projection["models"] = candidate["models"]
-                instance.execute.return_value = json.dumps(projection)
+                instance.execute.return_value = deployment.base64.b64encode(
+                    deployment.zlib.compress(json.dumps(projection).encode())).decode()
                 candidate.update(startedAt=deployment.utc_now(), runId="current-run")
                 with patch.object(deployment, "az", side_effect=cloud):
                     with self.assertRaises((ValueError, TypeError)):
@@ -322,9 +365,10 @@ class PrivateDeploymentTests(unittest.TestCase):
             candidate["models"].append(copy.deepcopy(candidate["models"][0]))
             candidate["quotaRequests"]["model"]["requested"] = 4
             sources["usage"][0]["limit"] = 6
-            projection = json.loads(instance.execute.return_value)
+            projection = json.loads(deployment.zlib.decompress(deployment.base64.b64decode(instance.execute.return_value)))
             projection["models"] = candidate["models"]
-            instance.execute.return_value = json.dumps(projection)
+            instance.execute.return_value = deployment.base64.b64encode(
+                deployment.zlib.compress(json.dumps(projection).encode())).decode()
             candidate.update(startedAt=deployment.utc_now(), runId="current-run")
             with patch.object(deployment, "az", side_effect=cloud):
                 result = instance.foundry_discovery(candidate)
@@ -356,9 +400,10 @@ class PrivateDeploymentTests(unittest.TestCase):
                 elif field == "unit":
                     sources["usage"][0]["unit"] = "different"
                 else:
-                    changed = json.loads(instance.execute.return_value)
+                    changed = json.loads(deployment.zlib.decompress(deployment.base64.b64decode(instance.execute.return_value)))
                     changed["planSha256"] = "e" * 64
-                    instance.execute.return_value = json.dumps(changed)
+                    instance.execute.return_value = deployment.base64.b64encode(
+                        deployment.zlib.compress(json.dumps(changed).encode())).decode()
                 with patch.object(deployment, "az", side_effect=cloud), \
                         patch.object(deployment, "urlopen") as prices, patch.object(deployment, "confirm") as confirm:
                     with self.assertRaisesRegex(RuntimeError, "^foundry_preflight_refused$"):
@@ -520,9 +565,10 @@ class PrivateDeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "^foundry_preflight_refused$"):
                 instance.foundry_plan()
             instance.execute.assert_not_called()
-            projection = json.loads(instance.execute.return_value)
+            projection = json.loads(deployment.zlib.decompress(deployment.base64.b64decode(instance.execute.return_value)))
             projection.update(template=candidate["template"], parameters=candidate["parameters"])
-            instance.execute.return_value = json.dumps(projection)
+            instance.execute.return_value = deployment.base64.b64encode(
+                deployment.zlib.compress(json.dumps(projection).encode())).decode()
             deployment.write_private(instance.directory / "foundry-estimate-inputs.json", json.dumps({
                 key: candidate[key] for key in ("quotaRequests", "usage", "meterSkus")}))
 

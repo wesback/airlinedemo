@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import time
 import uuid
+import zlib
 from urllib.parse import urlencode, urlparse
 from urllib.request import urlopen
 
@@ -205,7 +206,7 @@ class Deployment:
     def foundry_plan_evidence(self, candidate=False):
         scope = f"/subscriptions/{self.args.subscription_id}/resourceGroups/{self.app_rg}" if candidate else None
         script = """python3 - <<'PY'
-import json, pathlib, runpy, subprocess
+import base64, json, pathlib, runpy, subprocess, zlib
 helpers = runpy.run_path('scripts/deploy-private.py')
 path = pathlib.Path('/var/lib/airlinedemo/foundry.tfplan')
 plan_bytes = path.read_bytes()
@@ -216,10 +217,18 @@ with tempfile.NamedTemporaryFile(dir=path.parent, prefix='foundry-inspect.') as 
     os.chmod(snapshot.name, 0o400)
     plan = json.loads(subprocess.check_output(['terraform', '-chdir=infra/terraform', 'show', '-json', snapshot.name]))
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-    print(json.dumps(helpers['foundry_plan_fingerprint'](plan, plan_bytes, revision, scope=SCOPE)))
+    projection = helpers['foundry_plan_fingerprint'](plan, plan_bytes, revision, scope=SCOPE)
+    encoded = base64.b64encode(zlib.compress(json.dumps(projection).encode())).decode()
+    helpers['require_evidence'](len(encoded) <= 3500)
+    print(encoded)
 PY
 """
-        return json.loads(self.execute(script.replace("scope=SCOPE", "scope=" + repr(scope))))
+        encoded = self.execute(script.replace("scope=SCOPE", "scope=" + repr(scope))).strip()
+        try:
+            require_evidence(0 < len(encoded) <= 3500)
+            return json.loads(zlib.decompress(base64.b64decode(encoded, validate=True)))
+        except (ValueError, TypeError, zlib.error):
+            raise RuntimeError("foundry_plan_evidence_invalid") from None
 
     def foundry_plan(self):
         (self.directory / "foundry-candidate.json").unlink(missing_ok=True)
