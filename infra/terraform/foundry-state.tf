@@ -155,7 +155,6 @@ resource "azurerm_role_assignment" "foundry_provisioner_blob" {
   scope                = azurerm_storage_account.foundry[0].id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = var.terraform_principal_object_id
-  principal_type       = "ServicePrincipal"
 }
 
 resource "azurerm_role_assignment" "foundry_provisioner_cosmos" {
@@ -163,5 +162,4 @@ resource "azurerm_role_assignment" "foundry_provisioner_cosmos" {
   scope                = azurerm_cosmosdb_account.foundry[0].id
   role_definition_name = "Cosmos DB Operator"
   principal_id         = var.terraform_principal_object_id
-  principal_type       = "ServicePrincipal"
 }

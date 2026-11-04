@@ -113,7 +113,8 @@ resource "azurerm_network_security_group" "foundry_agent" {
       access                     = "Allow"
       protocol                   = security_rule.value.protocol
       source_port_range          = "*"
-      destination_port_ranges    = security_rule.value.ports
+      destination_port_range     = length(security_rule.value.ports) == 1 ? security_rule.value.ports[0] : null
+      destination_port_ranges    = length(security_rule.value.ports) > 1 ? security_rule.value.ports : null
       source_address_prefix      = local.foundry_agent_cidr
       destination_address_prefix = security_rule.value.destination
     }

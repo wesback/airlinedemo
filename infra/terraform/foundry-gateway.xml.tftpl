@@ -62,7 +62,7 @@
           if (body == null || body.Properties().Any(p => !new[] { "agent_reference", "conversation", "input", "max_output_tokens", "truncation", "background", "stream", "metadata" }.Contains(p.Name))) { return true; }
           var agent = body["agent_reference"] as Newtonsoft.Json.Linq.JObject;
           if (agent == null || agent.Properties().Count() != 3 || (string)agent["type"] != "agent_reference") { return true; }
-          if (new[] { "type", "name", "version" }.Any(name => agent[name]?.Type != Newtonsoft.Json.Linq.JTokenType.String)) { return true; }
+          if (new[] { "type", "name", "version" }.Any(property => agent[property]?.Type != Newtonsoft.Json.Linq.JTokenType.String)) { return true; }
           if (body["conversation"]?.Type != Newtonsoft.Json.Linq.JTokenType.String ||
             !System.Text.RegularExpressions.Regex.IsMatch((string)body["conversation"], "^[A-Za-z0-9_-]{1,128}\\z") ||
             !(body["input"] is Newtonsoft.Json.Linq.JArray)) { return true; }

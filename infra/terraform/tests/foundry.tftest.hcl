@@ -19,6 +19,11 @@ mock_provider "azurerm" {
       principal_id = "99999999-9999-9999-9999-999999999999"
     }
   }
+  mock_resource "azurerm_role_assignment" {
+    defaults = {
+      principal_type = "User"
+    }
+  }
   mock_resource "azurerm_api_management" {
     defaults = {
       identity = {
@@ -856,6 +861,17 @@ run "foundry_agent_network_is_private_delegated_and_linked" {
     )
     error_message = "Foundry egress must allow explicit private/platform dependencies, never general internet access."
   }
+  assert {
+    condition = (
+      one([for rule in azurerm_network_security_group.foundry_agent[0].security_rule :
+      rule if rule.name == "allow-self"]).destination_port_range == "*" &&
+      one([for rule in azurerm_network_security_group.foundry_agent[0].security_rule :
+      rule if rule.name == "allow-data"]).destination_port_range == "443" &&
+      alltrue([for rule in azurerm_network_security_group.foundry_agent[0].security_rule :
+      !contains(coalesce(rule.destination_port_ranges, toset([])), "*")])
+    )
+    error_message = "Azure requires wildcard/single ports in destinationPortRange, never a wildcard inside destinationPortRanges."
+  }
 }
 
 run "foundry_rejects_overlapping_application_subnet" {
@@ -1032,9 +1048,11 @@ run "foundry_state_is_private_keyless_and_explicitly_sized" {
       azurerm_role_assignment.foundry_provisioner_blob[0].scope == azurerm_storage_account.foundry[0].id &&
       azurerm_role_assignment.foundry_provisioner_blob[0].role_definition_name == "Storage Blob Data Contributor" &&
       azurerm_role_assignment.foundry_provisioner_blob[0].principal_id == var.terraform_principal_object_id &&
+      azurerm_role_assignment.foundry_provisioner_blob[0].principal_type == "User" &&
       azurerm_role_assignment.foundry_provisioner_cosmos[0].scope == azurerm_cosmosdb_account.foundry[0].id &&
       azurerm_role_assignment.foundry_provisioner_cosmos[0].role_definition_name == "Cosmos DB Operator" &&
-      azurerm_role_assignment.foundry_provisioner_cosmos[0].principal_id == var.terraform_principal_object_id
+      azurerm_role_assignment.foundry_provisioner_cosmos[0].principal_id == var.terraform_principal_object_id &&
+      azurerm_role_assignment.foundry_provisioner_cosmos[0].principal_type == "User"
     )
     error_message = "Only the existing Terraform principal receives the two account-scoped provisioning grants."
   }
