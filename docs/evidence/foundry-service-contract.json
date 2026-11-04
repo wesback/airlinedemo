@@ -297,11 +297,13 @@
         "capabilitySettings.vectorStore": "Azure AI Search resource ID for retrieval/indexing"
       },
       "projectMutability": "create time only; omitted fields inherit account defaults",
-      "state": "September preview is advertised for account/project and its capability ARM-ID schema matches July. July actual creation rejected the documented vectorStore ID with LinkedInvalidPropertyId. September is a bounded compatibility candidate, not a verified live fix. Preserve full store IDs and closed-template/readback checks.",
+      "state": "Both July and September writes rejected the documented vectorStore ID on the account before project creation. The next bounded candidate omits optional account defaults and declares all three exact store IDs on the only project. Preserve full store IDs and closed-template/readback checks; project-only runtime support is not yet verified.",
+      "storeBindingScope": "Explicit complete project capability settings at creation; no account defaults, partial inheritance, name-only values or Microsoft-managed store fallback.",
       "compatibilitySpecification": {
         "source": "https://github.com/Azure/azure-rest-api-specs/blob/a146caa4569e6b690faea032d6e98571bd9d8eaf/specification/cognitiveservices/resource-manager/Microsoft.CognitiveServices/CognitiveServices/preview/2026-09-15-preview/cognitiveservices.json",
         "result": "CapabilitySettings explicitly uses format arm-id and exact allowed resource types for blobStore, documentStore and vectorStore in both previews.",
-        "limitation": "Native validation and what-if did not detect the July write-time rejection; actual September provisioning and private runtime checks are required."
+        "scopeContract": "AccountProperties.capabilitySettings is optional reusable defaults. ProjectProperties.capabilitySettings is an effective create-time override; omitted fields inherit account defaults when present.",
+        "limitation": "Native validation and what-if did not detect either account write-time rejection; actual project-only provisioning and exact private store/runtime readback are required."
       },
       "officialJsonSchema": {
         "source": "https://raw.githubusercontent.com/Azure/azure-resource-manager-schemas/main/schemas/2026-07-15-preview/Microsoft.CognitiveServices.json",

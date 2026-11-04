@@ -151,7 +151,6 @@ class PrivateDeploymentTests(unittest.TestCase):
                  "kind": "AIServices", "sku": {"name": "S0"}, "identity": {"type": "SystemAssigned"},
                  "properties": {"allowProjectManagement": True, "customSubDomainName": "[parameters('accountName')]",
                                 "disableLocalAuth": True, "publicNetworkAccess": "Disabled",
-                                "capabilitySettings": settings,
                                 "networkInjections": [{"scenario": "agent", "useMicrosoftManagedNetwork": False,
                                                        "subnetArmId": scope + "/providers/Microsoft.Network/virtualNetworks/synthetic/subnets/agents"}]}},
                 {"type": "Microsoft.CognitiveServices/accounts/projects", "apiVersion": "2026-09-15-preview",
@@ -303,17 +302,25 @@ class PrivateDeploymentTests(unittest.TestCase):
                         instance.foundry_arm_evidence(request)
                     instance.execute.assert_not_called()
 
-            for path, value in ((("properties", "publicNetworkAccess"), "Enabled"),
-                                (("properties", "disableLocalAuth"), False),
-                                (("properties", "unexpected"), "not-admitted"),
-                                (("properties", "capabilitySettings", "documentStore"), 42),
-                                (("properties", "networkInjections", 0, "useMicrosoftManagedNetwork"), True),
-                                (("apiVersion",), "2026-05-15-preview"),
-                                (("apiVersion",), "2026-07-15-preview"),
-                                (("apiVersion",), "2026-09-01")):
-                with self.subTest(path=path):
+            settings = template["resources"][1]["properties"]["capabilitySettings"]
+            for index, path, value in (
+                    (0, ("properties", "publicNetworkAccess"), "Enabled"),
+                    (0, ("properties", "disableLocalAuth"), False),
+                    (0, ("properties", "unexpected"), "not-admitted"),
+                    (0, ("properties", "capabilitySettings"), settings),
+                    (1, ("properties", "capabilitySettings", "documentStore"), 42),
+                    (1, ("properties", "capabilitySettings", "vectorStore"), "synthetic"),
+                    (1, ("properties", "capabilitySettings", "vectorStore"),
+                     scope + "-other/providers/Microsoft.Search/searchServices/synthetic"),
+                    (1, ("properties", "capabilitySettings"),
+                     {key: value for key, value in settings.items() if key != "blobStore"}),
+                    (0, ("properties", "networkInjections", 0, "useMicrosoftManagedNetwork"), True),
+                    (0, ("apiVersion",), "2026-05-15-preview"),
+                    (0, ("apiVersion",), "2026-07-15-preview"),
+                    (0, ("apiVersion",), "2026-09-01")):
+                with self.subTest(index=index, path=path):
                     changed = copy.deepcopy(request)
-                    target = changed["template"]["resources"][0]
+                    target = changed["template"]["resources"][index]
                     for part in path[:-1]:
                         target = target[part]
                     target[path[-1]] = value

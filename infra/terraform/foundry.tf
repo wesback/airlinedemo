@@ -70,7 +70,6 @@ locals {
           customSubDomainName    = "[parameters('accountName')]"
           disableLocalAuth       = true
           publicNetworkAccess    = "Disabled"
-          capabilitySettings     = local.foundry_stores
           networkInjections = [{
             scenario                   = "agent"
             subnetArmId                = var.foundry_enabled ? "${local.rg_scope}/providers/Microsoft.Network/virtualNetworks/${azurerm_virtual_network.demo.name}/subnets/${azurerm_subnet.foundry_agent[0].name}" : null

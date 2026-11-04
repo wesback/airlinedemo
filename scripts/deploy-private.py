@@ -232,17 +232,20 @@ def validate_foundry_template(template, parameters, scope):
     require_evidence(account["kind"] == "AIServices" and account["sku"] == {"name": "S0"})
     properties = account["properties"]
     require_evidence(set(properties) == {"allowProjectManagement", "customSubDomainName", "disableLocalAuth",
-                                        "publicNetworkAccess", "capabilitySettings", "networkInjections"})
+                                        "publicNetworkAccess", "networkInjections"})
     require_evidence(properties["allowProjectManagement"] is True and properties["disableLocalAuth"] is True)
     require_evidence(properties["publicNetworkAccess"] == "Disabled")
     require_evidence(properties["customSubDomainName"] == "[parameters('accountName')]")
     expected_stores = {"blobStore": "Microsoft.Storage/storageAccounts",
                        "documentStore": "Microsoft.DocumentDB/databaseAccounts",
                        "vectorStore": "Microsoft.Search/searchServices"}
-    require_evidence(set(properties["capabilitySettings"]) == set(expected_stores))
+    project_properties = project["properties"]
+    require_evidence(set(project_properties) == {"displayName", "capabilitySettings"})
+    stores = project_properties["capabilitySettings"]
+    require_evidence(set(stores) == set(expected_stores))
     for key, provider in expected_stores.items():
         require_evidence(re.fullmatch(re.escape(scope + "/providers/" + provider) + r"/[A-Za-z0-9._-]+",
-                                     properties["capabilitySettings"][key]) is not None)
+                                     stores[key]) is not None)
     require_evidence(template["outputs"] == foundry_template_outputs())
     require_evidence(len(properties["networkInjections"]) == 1)
     injection = properties["networkInjections"][0]
@@ -252,8 +255,7 @@ def validate_foundry_template(template, parameters, scope):
                                  r"[A-Za-z0-9._-]+/subnets/[A-Za-z0-9._-]+", injection["subnetArmId"]) is not None)
     require_evidence(project["name"] == "[format('{0}/{1}', parameters('accountName'), parameters('projectName'))]")
     require_evidence(project["dependsOn"] == ["[resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName'))]"])
-    require_evidence(project["properties"] == {"displayName": "[parameters('projectName')]",
-                                              "capabilitySettings": properties["capabilitySettings"]})
+    require_evidence(project_properties["displayName"] == "[parameters('projectName')]")
 
 
 class Deployment:

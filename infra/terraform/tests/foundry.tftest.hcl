@@ -174,7 +174,7 @@ run "foundry_saved_template_uses_plan_known_resource_names" {
   }
   assert {
     condition = (
-      jsondecode(azurerm_resource_group_template_deployment.foundry[0].template_content).resources[0].properties.capabilitySettings == {
+      jsondecode(azurerm_resource_group_template_deployment.foundry[0].template_content).resources[1].properties.capabilitySettings == {
         blobStore     = "${local.rg_scope}/providers/Microsoft.Storage/storageAccounts/${azurerm_storage_account.foundry[0].name}"
         documentStore = "${local.rg_scope}/providers/Microsoft.DocumentDB/databaseAccounts/${azurerm_cosmosdb_account.foundry[0].name}"
         vectorStore   = "${local.rg_scope}/providers/Microsoft.Search/searchServices/${azurerm_search_service.foundry[0].name}"
@@ -220,17 +220,16 @@ run "foundry_account_project_are_private_injected_and_single_owned" {
         subnetArmId                = "${local.rg_scope}/providers/Microsoft.Network/virtualNetworks/${azurerm_virtual_network.demo.name}/subnets/${azurerm_subnet.foundry_agent[0].name}"
         useMicrosoftManagedNetwork = false
       }] &&
-      local.foundry_template.resources[0].properties.capabilitySettings == tomap({
+      !contains(keys(local.foundry_template.resources[0].properties), "capabilitySettings") &&
+      local.foundry_template.resources[1].properties.capabilitySettings == tomap({
         blobStore     = "${local.rg_scope}/providers/Microsoft.Storage/storageAccounts/${azurerm_storage_account.foundry[0].name}"
         documentStore = "${local.rg_scope}/providers/Microsoft.DocumentDB/databaseAccounts/${azurerm_cosmosdb_account.foundry[0].name}"
         vectorStore   = "${local.rg_scope}/providers/Microsoft.Search/searchServices/${azurerm_search_service.foundry[0].name}"
       }) &&
-      local.foundry_template.resources[1].properties.capabilitySettings ==
-      local.foundry_template.resources[0].properties.capabilitySettings &&
       local.foundry_template.resources[1].dependsOn ==
       ["[resourceId('Microsoft.CognitiveServices/accounts', parameters('accountName'))]"]
     )
-    error_message = "Creation-time injection and both capability settings must reference the exact private subnet and BYO stores."
+    error_message = "Creation-time injection and explicit project capability settings must reference the exact private subnet and BYO stores, without account defaults."
   }
   assert {
     condition = (
