@@ -180,7 +180,7 @@
       "expandedItemCapturedDate": "2026-11-03",
       "operationBoundary": "Create-items response documents conversation-resource shapes; list/get currently document Responses output unions. This is schema evidence only: do not add create-items or individual-item GET to runtime APIM.",
       "publicOpenApiSource": "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/main/specification/ai/data-plane/OpenAI.v1/azure-v1-v1-generated.json",
-      "publicOpenApiSha256": "9fade08c5d30751828e67fecca63b3800567c802d1d6c4c91bba3d193843f7a8",
+      "publicSchemaSha256": "9fade08c5d30751828e67fecca63b3800567c802d1d6c4c91bba3d193843f7a8",
       "documentedShapes": {
         "message": {
           "schema": "OpenAI.ConversationItemMessage",
