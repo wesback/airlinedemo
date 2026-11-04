@@ -434,6 +434,33 @@ run "foundry_runtime_grants_use_exact_project_generated_scopes" {
   }
 }
 
+run "foundry_container_scopes_remain_exact_when_readback_is_unavailable" {
+  command = plan
+  variables {
+    foundry_enabled = true
+  }
+  override_module {
+    target = module.foundry_store_readback[0]
+    outputs = {
+      scopes = {}
+    }
+  }
+  expect_failures = [
+    azurerm_role_assignment.foundry_runtime["files"],
+    azurerm_role_assignment.foundry_runtime["agent_files"],
+    azurerm_cosmosdb_sql_role_assignment.foundry_runtime[0]
+  ]
+  assert {
+    condition = (
+      local.foundry_runtime_grants.files.scope ==
+      "${azurerm_storage_account.foundry[0].id}/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore" &&
+      local.foundry_runtime_grants.agent_files.scope ==
+      "${azurerm_storage_account.foundry[0].id}/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-agent"
+    )
+    error_message = "Unavailable verification must reject grants without changing their exact configured container scopes."
+  }
+}
+
 run "foundry_application_receives_exact_published_runtime_profile" {
   command = plan
   variables {
