@@ -369,6 +369,11 @@ run "signing_rights_are_resource_scoped" {
   }
 
   assert {
+    condition     = one(azurerm_key_vault_certificate.signing.certificate_policy[0].lifetime_action).action[0].action_type == "AutoRenew" && one(azurerm_key_vault_certificate.signing.certificate_policy[0].lifetime_action).trigger[0].lifetime_percentage == 80
+    error_message = "The signing certificate must retain automatic renewal at 80 percent of its lifetime."
+  }
+
+  assert {
     condition     = azurerm_role_assignment.release_container_app[0].role_definition_name == "Container Apps Contributor" && azurerm_role_assignment.release_container_app[0].scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.App/containerApps/ca-airline-demo-test" && azurerm_role_assignment.release_container_app[0].principal_id == azurerm_user_assigned_identity.release.principal_id
     error_message = "The release identity must hold Container Apps Contributor scoped to the application only."
   }

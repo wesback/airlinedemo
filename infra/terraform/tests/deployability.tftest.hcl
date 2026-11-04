@@ -268,9 +268,15 @@ run "build_runner_is_private_and_reads_only_its_token" {
   }
 
   variables {
-    enable_build_runner               = true
-    build_runner_github_repository    = "wesback/airlinedemo"
-    build_runner_admin_ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDAPD8CazJZiMuT896VEPnnF3hpgv2WYm5euSS6lqUNy plan-only-test"
+    enable_build_runner                       = true
+    build_runner_github_repository            = "wesback/airlinedemo"
+    build_runner_admin_ssh_public_key         = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDAPD8CazJZiMuT896VEPnnF3hpgv2WYm5euSS6lqUNy plan-only-test"
+    build_runner_os_disk_storage_account_type = "Standard_LRS"
+  }
+
+  assert {
+    condition     = azurerm_linux_virtual_machine.build_runner[0].os_disk[0].storage_account_type == "Standard_LRS"
+    error_message = "The runner must retain the explicitly selected existing disk SKU instead of replacing its VM."
   }
 
   assert {
@@ -312,6 +318,25 @@ run "build_runner_needs_repository_and_key" {
   }
 
   expect_failures = [azurerm_linux_virtual_machine.build_runner]
+}
+
+run "build_runner_rejects_unknown_disk_sku" {
+  command = plan
+
+  variables {
+    build_runner_os_disk_storage_account_type = "invalid"
+  }
+
+  expect_failures = [var.build_runner_os_disk_storage_account_type]
+}
+
+run "sql_retains_express_vulnerability_assessment" {
+  command = plan
+
+  assert {
+    condition     = azurerm_mssql_server.sql.express_vulnerability_assessment_enabled == true
+    error_message = "Planning the application must not disable the existing SQL express vulnerability assessment."
+  }
 }
 
 run "gateway_hostnames_resolve_privately_in_vnet" {

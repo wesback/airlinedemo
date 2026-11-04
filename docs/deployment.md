@@ -149,6 +149,15 @@ When fresh rebuild settings exist, Foundry planning uses that variable/backend
 pair rather than the previous deployment's saved settings. Missing members of
 the fresh pair stop planning instead of mixing old and new inputs.
 
+For a retained build runner, set the optional
+`build_runner_os_disk_storage_account_type` to its actual OS disk SKU in the
+selected settings before planning; the default remains `Premium_LRS`. Supported
+values are `Standard_LRS`, `StandardSSD_LRS` and `Premium_LRS`. A mismatched SKU
+would replace the VM and is rejected by the Foundry no-deletion guard. Azure
+retains ownership of the NAT IP's `FirstPartyUsage` allocation tag; other IP
+settings remain Terraform-managed. SQL express vulnerability assessment and
+signing-certificate auto-renewal at 80 percent of lifetime are explicitly retained.
+
 The candidate adds a separate APIM API at
 `/foundry/projects/airline-demo/openai/v1`. It admits only conversation
 create/read/delete, item list/delete and response create/read/delete. Other

@@ -390,6 +390,17 @@ variable "build_runner_vm_size" {
   nullable    = false
 }
 
+variable "build_runner_os_disk_storage_account_type" {
+  description = "Runner OS disk SKU. Preserve the existing SKU when resuming a retained runner to avoid VM replacement."
+  type        = string
+  default     = "Premium_LRS"
+  nullable    = false
+  validation {
+    condition     = contains(["Standard_LRS", "StandardSSD_LRS", "Premium_LRS"], var.build_runner_os_disk_storage_account_type)
+    error_message = "build_runner_os_disk_storage_account_type must be Standard_LRS, StandardSSD_LRS or Premium_LRS."
+  }
+}
+
 variable "build_runner_subnet_cidr" {
   description = "Optional. Defaults to the fifth /24 of the virtual network."
   type        = string
