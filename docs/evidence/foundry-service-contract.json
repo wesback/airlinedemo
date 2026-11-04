@@ -286,7 +286,15 @@
         "source": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-03-01/accounts/projects/capabilityhosts"
       }
     ],
-    "capabilityProvider": "AzureRM 4.81.0 ARM-template deployment owns account/project capabilitySettings. No parallel legacy capability-host owner.",
+    "capabilityProvider": "AzureRM 4.81.0 ARM-template deployment owns account/project. Actual project capabilitySettings were ignored; the separately recorded additive native compatibility prerequisite owns three AAD connections and one project capability host, reusing the automatic account host. Durable default orchestration remains incomplete.",
+    "capabilityHostCompatibilityObservation": {
+      "source": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/virtual-networks",
+      "revision": "c7776ee8f46821db735f0007e4146543df10f3fb",
+      "officialSampleRevision": "d88d0d97133a1e37a0ac289135645bb243020a8a",
+      "result": "The documented backward-compatible project-managed-identity provisioning route created the exact three AAD resource connections, project Agents host, two private Blob containers and enterprise_memory. The temporary account Blob data grant was removed before any agent execution.",
+      "agentBlobName": "Actual generated name is workspace GUID, hyphen, 12 lowercase hex characters, then -azureml-agent. Record the exact private readback; reject foreign workspaces or other suffixes without broader data grants.",
+      "limitation": "Only the three Classic-named Cosmos containers are present after capability-host creation. New agent-definitions-v1/run-state-v1 creation and New API routing to these BYO stores remain unverified. No agent has been published and no New-runtime success is claimed."
+    },
     "capabilitySettingsSchemaCandidate": {
       "apiVersion": "2026-09-15-preview",
       "accountSource": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-09-15-preview/accounts",
@@ -297,7 +305,7 @@
         "capabilitySettings.vectorStore": "Azure AI Search resource ID for retrieval/indexing"
       },
       "projectMutability": "create time only; omitted fields inherit account defaults",
-      "state": "Both July and September writes rejected the documented vectorStore ID on the account before project creation. The next bounded candidate omits optional account defaults and declares all three exact store IDs on the only project. Preserve full store IDs and closed-template/readback checks; project-only runtime support is not yet verified.",
+      "state": "Both July and September writes rejected the documented vectorStore ID on the account. Omitting account defaults allowed account/project creation, but project GET omitted capabilitySettings and no stores/connections were provisioned. The documented compatibility-host prerequisite created BYO connections/stores; New runtime compatibility remains unverified.",
       "storeBindingScope": "Explicit complete project capability settings at creation; no account defaults, partial inheritance, name-only values or Microsoft-managed store fallback.",
       "compatibilitySpecification": {
         "source": "https://github.com/Azure/azure-rest-api-specs/blob/a146caa4569e6b690faea032d6e98571bd9d8eaf/specification/cognitiveservices/resource-manager/Microsoft.CognitiveServices/CognitiveServices/preview/2026-09-15-preview/cognitiveservices.json",

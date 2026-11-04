@@ -434,6 +434,59 @@ run "foundry_runtime_grants_use_exact_project_generated_scopes" {
   }
 }
 
+run "foundry_runtime_accepts_exact_existing_salted_agent_container" {
+  command = plan
+  variables {
+    foundry_enabled              = true
+    foundry_agent_container_name = "01234567-89ab-cdef-0123-456789abcdef-0123456789ab-azureml-agent"
+  }
+  override_module {
+    target = module.foundry_store_readback[0]
+    outputs = {
+      scopes = {
+        containers = {
+          files = {
+            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-azureml-blobstore"
+            access = "private"
+          }
+          agent_files = {
+            id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/01234567-89ab-cdef-0123-456789abcdef-0123456789ab-azureml-agent"
+            access = "private"
+          }
+        }
+        cosmosDatabaseId = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.DocumentDB/databaseAccounts/cosmos-foundry/sqlDatabases/enterprise_memory"
+      }
+    }
+  }
+  assert {
+    condition = (
+      local.foundry_blob_containers.agent_files == var.foundry_agent_container_name &&
+      azurerm_role_assignment.foundry_runtime["agent_files"].scope ==
+      "${azurerm_storage_account.foundry[0].id}/blobServices/default/containers/${var.foundry_agent_container_name}" &&
+      azurerm_role_assignment.foundry_runtime["agent_files"].role_definition_name == "Storage Blob Data Owner"
+    )
+    error_message = "A discovered salted container must retain exact existing-container readback and container-only data scope."
+  }
+}
+
+run "foundry_runtime_rejects_foreign_project_agent_container" {
+  command = plan
+  variables {
+    foundry_enabled              = true
+    foundry_agent_container_name = "ffffffff-ffff-ffff-ffff-ffffffffffff-0123456789ab-azureml-agent"
+  }
+  expect_failures = [var.foundry_agent_container_name]
+}
+
+run "foundry_runtime_rejects_unverified_agent_container_suffix" {
+  command = plan
+  variables {
+    foundry_enabled              = true
+    foundry_agent_container_name = "01234567-89ab-cdef-0123-456789abcdef-unknown-azureml-agent"
+  }
+  expect_failures = [var.foundry_agent_container_name]
+}
+
 run "foundry_publisher_and_evaluator_have_disjoint_project_privileges" {
   command = plan
   variables {

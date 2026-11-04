@@ -1,3 +1,17 @@
+variable "foundry_agent_container_name" {
+  description = "Exact existing private service-generated agent container discovered during setup; null retains the unsalted naming contract."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.foundry_agent_container_name == null ? true : can(regex(
+      "^${local.foundry_workspace_id}-([0-9a-f]{12}-)?azureml-agent$",
+      var.foundry_agent_container_name
+    ))
+    error_message = "The agent container must belong to the exact service-generated project workspace, with only an optional 12-hex service suffix."
+  }
+}
+
 locals {
   foundry_project_outputs = jsondecode(local.foundry_state_count == 0 ? "{}" : azurerm_resource_group_template_deployment.foundry[0].output_content)
   foundry_principal_id    = try(local.foundry_project_outputs.projectPrincipalId.value, "")
@@ -10,7 +24,7 @@ locals {
   foundry_workspace_id = try(join("-", regex("^([0-9a-f]{8})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})$", lower(local.foundry_internal_id))), "")
   foundry_blob_containers = local.foundry_state_count == 0 ? {} : {
     files       = "${local.foundry_workspace_id}-azureml-blobstore"
-    agent_files = "${local.foundry_workspace_id}-azureml-agent"
+    agent_files = var.foundry_agent_container_name == null ? "${local.foundry_workspace_id}-azureml-agent" : var.foundry_agent_container_name
   }
   foundry_runtime_grants = local.foundry_state_count == 0 ? {} : {
     cosmos_operator  = { scope = azurerm_cosmosdb_account.foundry[0].id, role = "Cosmos DB Operator" }

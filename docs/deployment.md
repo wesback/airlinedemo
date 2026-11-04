@@ -152,6 +152,22 @@ Search ID on the account despite native validation. The project-only route is
 a compatibility candidate, not proof of a working deployment; exact generated
 store/private runtime readback must pass before agents are published. Never
 replace store IDs with unverified names or reuse a partially applied saved plan.
+Actual project-only creation succeeded but returned no capability settings,
+connections or generated stores. The documented backward-compatible private
+capability-host provisioning route subsequently created the three AAD
+connections and project host using the same full resource IDs and existing
+network injection. Its temporary project Blob-account provisioning grant was
+removed after provisioning, before agent execution. New agent-runtime
+compatibility is still unverified; this management route does not change the
+pinned New agent/Responses APIs.
+
+The service-generated agent Blob container can include a 12-hex suffix between
+the project workspace GUID and `azureml-agent`. Setup must discover its exact
+existing private name and record `foundry_agent_container_name` in the protected
+settings; this is not another Azure ID requested from the operator. Terraform
+rejects another workspace or an unverified suffix, reads the exact existing
+container, and retains container-only data grants. It never creates a substitute
+container or grants account-wide runtime Blob data access.
 When fresh rebuild settings exist, Foundry planning uses that variable/backend
 pair rather than the previous deployment's saved settings. Missing members of
 the fresh pair stop planning instead of mixing old and new inputs.
