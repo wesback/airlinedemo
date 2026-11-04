@@ -772,6 +772,9 @@ class PrivateDeploymentTests(unittest.TestCase):
                 binary.write_text('#!/bin/sh\nprintf "%s|%s\\n" "$TFVARS_FILE" "$BACKEND_CONFIG_FILE" >> "$CALL_LOG"\n'
                                   'if [ "$2" = show ]; then printf \'{"values":{"root_module":{"resources":[]}}}\'; fi\n')
                 binary.chmod(0o700)
+                azure = root / "az"
+                azure.write_text("#!/bin/sh\nexit 0\n")
+                azure.chmod(0o700)
                 (root / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
                 if scenario != "saved":
                     fresh = root / "fresh-settings"
@@ -781,24 +784,24 @@ class PrivateDeploymentTests(unittest.TestCase):
                     if scenario != "missing-backend":
                         (fresh / "backend.hcl").write_text("")
 
-                def execute(script):
+                def remote(script):
                     subprocess.run(["bash", "-euo", "pipefail", "-c",
                                     script.replace("/var/lib/airlinedemo/", str(root) + "/")],
                                    cwd=root, check=True, capture_output=True,
                                    env={**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
-                                        "TFVARS_FILE": "saved-vars", "BACKEND_CONFIG_FILE": "saved-backend",
-                                        "AZURE_SUBSCRIPTION_ID": "00000000-0000-0000-0000-000000000000",
-                                        "APP_RESOURCE_GROUP": "rg-demo",
                                         "CALL_LOG": str(log)})
                     raise RuntimeError("stop after exercising production plan commands")
 
-                instance.execute.side_effect = execute
+                instance.source = str(root)
+                instance.sync = Mock()
+                instance.remote = Mock(side_effect=remote)
+                instance.execute = deployment.Deployment.execute.__get__(instance)
                 with self.assertRaisesRegex(RuntimeError, "^foundry_preflight_refused$"):
                     instance.foundry_plan()
                 if scenario.startswith("missing"):
                     self.assertFalse(log.exists())
                 else:
-                    expected = ("saved-vars|saved-backend" if scenario == "saved" else
+                    expected = (f"{root}/operator-settings/deploy.tfvars.json|{root}/operator-settings/backend.hcl" if scenario == "saved" else
                                 f"{root}/fresh-settings/deploy.tfvars.json|{root}/fresh-settings/backend.hcl")
                     self.assertEqual([expected, expected, expected], log.read_text().splitlines())
 
@@ -830,7 +833,7 @@ class PrivateDeploymentTests(unittest.TestCase):
                             patch.object(subprocess, "check_output", return_value=json.dumps(current).encode()), \
                             patch.object(subprocess, "run") as imported, \
                             patch.dict(os.environ, {"AZURE_SUBSCRIPTION_ID": fixture.scope.split("/")[2],
-                                                    "APP_RESOURCE_GROUP": "rg-demo", "TFVARS_FILE": "vars.json"}):
+                                                    "RESOURCE_GROUP_NAME": "rg-demo", "TFVARS_FILE": "vars.json"}):
                         if scenario == "foreign":
                             with self.assertRaises(ValueError):
                                 exec(script, {})

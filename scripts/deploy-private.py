@@ -292,7 +292,7 @@ python3 - <<'PY'
 import json, os, runpy, subprocess
 helpers = runpy.run_path("scripts/deploy-private.py")
 state = json.loads(subprocess.check_output(["terraform", "-chdir=infra/terraform", "show", "-json"]))
-scope = f"/subscriptions/{os.environ['AZURE_SUBSCRIPTION_ID']}/resourceGroups/{os.environ['APP_RESOURCE_GROUP']}"
+scope = f"/subscriptions/{os.environ['AZURE_SUBSCRIPTION_ID']}/resourceGroups/{os.environ['RESOURCE_GROUP_NAME']}"
 adoption = helpers["foundry_network_import"](state, scope, lambda resource_id:
     helpers["az"]("network", "vnet", "subnet", "show", "--ids", resource_id, private=True))
 if adoption is not None:
