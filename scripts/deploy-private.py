@@ -690,8 +690,7 @@ terraform -chdir=infra/terraform apply -input=false "$plan"
 """)
 
     def foundry_agents(self):
-        outputs = json.loads(self.execute("terraform -chdir=infra/terraform output -json"))
-        setup = outputs.get("foundry_agent_setup", {}).get("value")
+        setup = json.loads(self.execute("terraform -chdir=infra/terraform output -json foundry_agent_setup"))
         if not isinstance(setup, dict):
             raise RuntimeError("foundry_agents_not_ready")
         publisher_resource_id = setup.get("publisher_identity_resource_id")

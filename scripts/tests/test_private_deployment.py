@@ -1043,7 +1043,7 @@ class PrivateDeploymentTests(unittest.TestCase):
             "agents": manifest_agents,
         }
         instance.execute = Mock(side_effect=[
-            json.dumps({"foundry_agent_setup": {"value": setup}}),
+            json.dumps(setup),
             "MANAGED_AGENT_PREVIEW:" + json.dumps(preview),
         ])
         instance.remote = Mock()
@@ -1167,7 +1167,22 @@ class PrivateDeploymentTests(unittest.TestCase):
             def execute(script):
                 if "output -json" in script:
                     events.append("outputs")
-                    return json.dumps({"foundry_agent_setup": {"value": setup}})
+                    environment = dict(os.environ, SETUP_JSON=json.dumps(setup),
+                                       ALL_OUTPUTS_JSON=json.dumps({
+                                           "sql_grants": {"value": "x" * 8192},
+                                           "foundry_agent_setup": {"value": setup},
+                                       }))
+                    shell = """terraform() {
+  if [ "$*" = "-chdir=infra/terraform output -json foundry_agent_setup" ]; then
+    printf '%s' "$SETUP_JSON"
+  else
+    printf '%s' "$ALL_OUTPUTS_JSON"
+  fi
+}
+"""
+                    output = subprocess.check_output(["bash", "-euo", "pipefail", "-c", shell + script],
+                                                     env=environment, text=True)
+                    return output[-4096:]
                 events.append("preview")
                 return "MANAGED_AGENT_PREVIEW:" + json.dumps(preview)
 
@@ -1199,6 +1214,19 @@ class PrivateDeploymentTests(unittest.TestCase):
             self.assertEqual(manifest, json.loads(release.read_text()))
             self.assertEqual(0o600, release.stat().st_mode & 0o777)
 
+    @patch.object(deployment, "run")
+    @patch.object(deployment, "az")
+    def test_foundry_agents_missing_setup_never_attaches_publisher(self, az, run):
+        for setup in (None, [], ""):
+            with self.subTest(setup=setup), tempfile.TemporaryDirectory() as directory:
+                instance, _, _, _, _ = self.foundry_agent_stage(directory)
+                instance.execute.side_effect = [json.dumps(setup)]
+                with self.assertRaisesRegex(RuntimeError, "^foundry_agents_not_ready$"):
+                    instance.foundry_agents()
+                instance.remote.assert_not_called()
+        az.assert_not_called()
+        run.assert_not_called()
+
     @patch.object(deployment, "confirm")
     @patch.object(deployment, "run")
     @patch.object(deployment, "az")
@@ -1206,7 +1234,7 @@ class PrivateDeploymentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             instance, setup, preview, _, _ = self.foundry_agent_stage(directory)
             instance.execute.side_effect = [
-                json.dumps({"foundry_agent_setup": {"value": setup}}),
+                json.dumps(setup),
                 "MANAGED_AGENT_PREVIEW:" + json.dumps(preview),
             ]
             az.side_effect = [
