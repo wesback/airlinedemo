@@ -61,7 +61,10 @@ public sealed class CopilotInvocationLedger(ICopilotInvocationStore store, TimeP
         "source_payload_limit", "source_read_failed", "copilot_point_limit", "copilot_context_invalid", "invalid_question",
         "copilot_input_not_approved", "model_manifest_refused", "model_unavailable", "model_response_invalid", "copilot_tool_limit",
         "copilot_model_limit", "copilot_retry_limit", "copilot_input_token_limit", "copilot_output_token_limit", "copilot_timeout",
-        "citation_invalid", "audit_unavailable", "release_unavailable",
+        "citation_invalid", "audit_unavailable", "release_unavailable", "conversation_not_found", "conversation_busy",
+        "conversation_context_mismatch", "conversation_expired", "conversation_turn_limit", "conversation_unavailable",
+        "conversation_history_invalid", "conversation_store_unavailable", "managed_agent_unconfigured", "managed_operation_ambiguous",
+        "managed_content_filtered", "managed_refusal",
     };
 
     private readonly byte[] _key = configuration["Copilot:AuditKey"] is { Length: > 0 } configured

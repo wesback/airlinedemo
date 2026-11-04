@@ -1,4 +1,5 @@
 using AirlineDemo.Api.Investigation;
+using AirlineDemo.Api.Persistence;
 using Microsoft.Extensions.AI;
 
 namespace AirlineDemo.Api.Tests;
@@ -163,6 +164,36 @@ public class InvestigationLimitsTests
         Assert.Contains(values, v => v?.StartsWith("trace-", StringComparison.Ordinal) == true);
         Assert.Contains(values, v => v?.StartsWith("actor-", StringComparison.Ordinal) == true);
         Assert.DoesNotContain(values, v => v is not null && (v.Contains("Return readiness", StringComparison.Ordinal) || v.Contains("synthetic-analyst-01", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Managed_execution_marks_internal_model_call_metrics_unavailable()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"investigation-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new CaseStateStore(path);
+            var scope = store.CreateCase("case-1", "owner-1");
+            var service = new InvestigationExecutionService(store);
+            var result = await service.ExecuteManagedAsync(
+                scope,
+                new InvestigationTraceContext("run-1", "inv-1", 1, "deployment-a", "v1", "swedencentral", "enabled", "escalate", "actor-1"),
+                ["SYNTHETIC EVIDENCE: Reserve approval is recorded."],
+                ClaimKind.MissingRequirement,
+                new Dictionary<string, BasisDocument>(),
+                "Reserve approval",
+                (_, _) => Task.FromResult(new InvestigationResult([], null)));
+
+            Assert.Null(result.ModelCalls);
+            Assert.Equal("approved", store.FindTrace(scope, "case-1", "run-1", "inv-1")?.Outcome);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
     }
 
     [Fact]

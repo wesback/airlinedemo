@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using AirlineDemo.Api.Foundry;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using Microsoft.Extensions.AI;
@@ -163,6 +164,24 @@ public sealed class InvestigationTraceRecorderTests : IDisposable
         Assert.Equal(new[] { CaseReadTools.SourcePageTool, "citation-check" }, trace.Steps.Select(s => s.ToolName).ToArray());
         Assert.Equal("quote-not-on-page", trace.Steps[1].CitationCheckOutcome);
         Assert.DoesNotContain(trace.Steps, s => s.PolicyHandover != "None");
+    }
+
+    [Fact]
+    public async Task ManagedBudgetFailurePreservesTypedBreachAndRecordsEscalation()
+    {
+        var store = new CaseStateStore(_path);
+        var scope = store.CreateCase("case-1", "owner-1");
+        var service = new InvestigationExecutionService(store);
+
+        var error = await Assert.ThrowsAsync<InvestigationLimitExceededException>(() =>
+            service.ExecuteManagedAsync(scope, Context("run-managed-limit"), Documents, ClaimKind.MissingRequirement, Basis(),
+                "Reserve approval", (_, _) => Task.FromException<InvestigationResult>(
+                    new ManagedProjectException("copilot_tool_limit"))));
+
+        Assert.Equal(InvestigationBreach.ToolCalls, error.Breach);
+        var trace = store.FindTrace(scope, "case-1", "run-managed-limit", "inv-1");
+        Assert.NotNull(trace);
+        Assert.Equal("escalated", trace.Outcome);
     }
 
     [Fact]

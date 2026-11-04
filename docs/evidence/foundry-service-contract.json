@@ -1,0 +1,446 @@
+{
+  "schemaVersion": 1,
+  "capturedDate": "2026-11-03",
+  "status": "offline-pinned",
+  "liveCompatibility": "not-tested",
+  "productionReady": false,
+  "baselineCommit": "1203bc00f0604faca332286945941f979c5893af",
+  "transportCandidate": {
+    "implementation": "typed-http",
+    "framework": "net10.0",
+    "additionalPackages": [],
+    "reason": "Explicit REST operations avoid implicit SDK write retries and expose required request fields.",
+    "existingComparativePackages": {
+      "OpenAI": "2.14.0",
+      "Microsoft.Agents.AI": "1.24.0",
+      "Azure.Identity": "1.21.0"
+    }
+  },
+  "dataPlane": {
+    "projectEndpointShape": "https://{resource}.services.ai.azure.com/api/projects/{project}",
+    "authentication": "Microsoft Entra ID",
+    "tokenScope": "https://ai.azure.com/.default",
+    "agentApiVersion": "v1",
+    "openaiPathVersion": "v1",
+    "referenceDocumentationCommit": "71eac358d12b993075c15b75840069c69528d180",
+    "runtimeOperationsVerifiedFromDocumentation": [
+      {
+        "method": "POST",
+        "path": "/openai/v1/conversations",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/create-conversation"
+      },
+      {
+        "method": "GET",
+        "path": "/openai/v1/conversations/{conversation_id}",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/get-conversation"
+      },
+      {
+        "method": "GET",
+        "path": "/openai/v1/conversations/{conversation_id}/items",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/list-conversation-items"
+      },
+      {
+        "method": "DELETE",
+        "path": "/openai/v1/conversations/{conversation_id}/items/{item_id}",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/delete-conversation-item"
+      },
+      {
+        "method": "DELETE",
+        "path": "/openai/v1/conversations/{conversation_id}",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/delete-conversation"
+      },
+      {
+        "method": "POST",
+        "path": "/openai/v1/responses",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/create-response"
+      },
+      {
+        "method": "GET",
+        "path": "/openai/v1/responses/{response_id}",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/get-response"
+      },
+      {
+        "method": "DELETE",
+        "path": "/openai/v1/responses/{response_id}",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/delete-response"
+      }
+    ],
+    "operatorOperationsVerifiedFromDocumentation": [
+      {
+        "method": "POST",
+        "path": "/agents/{agent_name}/versions?api-version=v1",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/agents-create-agent-version-agents-create-agent-version-from-code"
+      },
+      {
+        "method": "GET",
+        "path": "/agents/{agent_name}/versions?api-version=v1",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/agents-list-agent-versions"
+      },
+      {
+        "method": "GET",
+        "path": "/agents/{agent_name}/versions/{agent_version}?api-version=v1",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/agents-get-agent-version"
+      },
+      {
+        "method": "DELETE",
+        "path": "/agents/{agent_name}/versions/{agent_version}?api-version=v1",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/agents-delete-agent-version"
+      },
+      {
+        "method": "GET",
+        "path": "/openai/v1/conversations",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/list-conversations"
+      },
+      {
+        "method": "GET",
+        "path": "/openai/v1/responses",
+        "source": "https://learn.microsoft.com/azure/foundry/reference/rest/list-responses"
+      }
+    ],
+    "requiredResponseSettings": {
+      "agent_reference": {
+        "type": "agent_reference",
+        "name": "exact manifest name",
+        "version": "exact manifest version"
+      },
+      "max_output_tokens": 2000,
+      "truncation": "disabled",
+      "background": false,
+      "stream": false
+    },
+    "runtimeGateway": {
+      "apiPath": "/foundry/projects/{project}/openai/v1",
+      "operationCount": 8,
+      "unlistedOperationHandling": "GET/POST/DELETE/PUT/PATCH/HEAD/OPTIONS/TRACE wildcard operations return gateway_operation_forbidden before backend dispatch.",
+      "unpublishedHandling": "Null runtime profile is deny-only; exact two-agent names, numeric versions and distinct configuration SHA-256 identities are required to enable invocation.",
+      "roleName": "Foundry Agent Consumer",
+      "roleDefinitionId": "eed3b665-ab3a-47b6-8f48-c9382fb1dad6",
+      "dataAction": "Microsoft.CognitiveServices/accounts/AIServices/endpoints/interact/action",
+      "roleScope": "exact configured project, APIM managed identity only",
+      "wildcardDocumentation": "https://learn.microsoft.com/azure/api-management/import-app-service-as-api",
+      "wildcardDocumentationCommit": "e58039483d4513a4fabcf468cd4c38a0cd7f6a3e",
+      "validation": "All 145 mocked application Terraform runs passed; 25 actual rendered policies parsed as XML, including configured and deny-only variants.",
+      "limitation": "Native policy compilation, route precedence and private service/RBAC enforcement remain live acceptance checks."
+    },
+    "ordinaryPromptDefinition": {
+      "kind": "prompt",
+      "requiredDocumentedProperties": ["kind", "model"],
+      "usedDocumentedProperties": ["instructions", "tools", "text"],
+      "harness": "omitted",
+      "source": "https://learn.microsoft.com/azure/foundry/reference/rest/agents-create-agent-version-agents-create-agent-version-from-code"
+    },
+    "agentVersionLifecycle": {
+      "versionReadRequiredProperties": ["metadata", "object", "id", "name", "version", "created_at", "definition"],
+      "versionObject": "agent.version",
+      "immutability": "Every update creates a new version while retaining the agent name.",
+      "listParameters": ["limit", "order", "after", "before"],
+      "maximumPageSize": 100,
+      "listRequiredProperties": ["data", "has_more"],
+      "listCursorProperties": ["first_id", "last_id"],
+      "draftAgents": "excluded; do not opt in to DraftAgents=V1Preview",
+      "deleteRequiredProperties": ["object", "name", "version", "deleted"],
+      "deleteObject": "agent.version.deleted",
+      "deleteAcceptance": "exact requested name/version and deleted true; no force option for ordinary prompt agents",
+      "authorization": "operator only, never runtime APIM"
+    },
+    "unknownConversationCreateRecoveryCandidate": {
+      "createInitialContent": "none",
+      "metadataKeys": ["reservation_id", "attempt_id"],
+      "metadataServiceLimits": {
+        "pairs": 16,
+        "keyCharacters": 64,
+        "valueCharacters": 512
+      },
+      "lookupIdentity": "private cleanup/operator identity, not runtime app",
+      "lookupMethod": "Paginate project conversations and compare both exact metadata values locally.",
+      "queryParametersDocumented": ["limit", "order", "after", "before", "agent_name", "agent_id"],
+      "maximumPageSize": 100,
+      "serverSideMetadataFilter": "not documented",
+      "retryCreate": false,
+      "zeroOrMultipleMatches": "retain unresolved tombstone; never declare cleanup successful",
+      "liveProofRequired": true
+    },
+    "unknownResponseSubmissionRecoveryCandidate": {
+      "lookupIdentity": "private cleanup/operator identity, not runtime app",
+      "lookupMethod": "Paginate stored responses using the documented exact conversation_id filter; compare nonsecret submission correlation metadata locally.",
+      "queryParametersDocumented": ["limit", "order", "after", "before", "agent_name", "agent_id", "conversation_id"],
+      "maximumPageSize": 100,
+      "serverSideMetadataFilter": "not documented",
+      "retrySubmission": false,
+      "runtimeContinuation": "retire the binding and suppress late output; enumeration is cleanup evidence, not a successful application turn",
+      "incompleteOrAmbiguousEnumeration": "retain unresolved cleanup metadata; never declare deletion successful",
+      "source": "https://learn.microsoft.com/azure/foundry/reference/rest/list-responses",
+      "liveProofRequired": true
+    },
+    "documentedItemTypeCandidates": {
+      "source": "https://learn.microsoft.com/azure/foundry/reference/rest/list-conversation-items",
+      "types": ["message", "output_message", "function_call", "function_call_output", "configuration_update", "reasoning"],
+      "expandedItemSource": "https://ai.azure.com/api-reference/llm/conversations/create-conversation-items.md",
+      "expandedItemSourceSha256": "4d580750d305cb397ab8c3a68881233e799696d8686439125bdfacd847e18048",
+      "expandedItemCapturedDate": "2026-11-03",
+      "operationBoundary": "Create-items response documents conversation-resource shapes; list/get currently document Responses output unions. This is schema evidence only: do not add create-items or individual-item GET to runtime APIM.",
+      "publicOpenApiSource": "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/main/specification/ai/data-plane/OpenAI.v1/azure-v1-v1-generated.json",
+      "publicSchemaSha256": "9fade08c5d30751828e67fecca63b3800567c802d1d6c4c91bba3d193843f7a8",
+      "documentedShapes": {
+        "message": {
+          "schema": "OpenAI.ConversationItemMessage",
+          "required": ["type", "id", "status", "role", "content"],
+          "roles": ["unknown", "user", "assistant", "system", "critic", "discriminator", "developer", "tool"],
+          "content": "Conversation content union includes input_text/output_text/refusal; application subset below is deliberately narrower.",
+          "status": ["in_progress", "completed", "incomplete"],
+          "boundary": "Conversation-resource message permits assistant. Do not confuse it with input-message schema, which permits user/system/developer only."
+        },
+        "output_message": {
+          "schema": "OpenAI.OutputItemOutputMessage",
+          "required": ["id", "type", "role", "content", "status"],
+          "role": "assistant",
+          "status": ["in_progress", "completed", "incomplete"],
+          "content": "output_text requires type/text/annotations/logprobs; refusal requires type/refusal.",
+          "boundary": "Responses output schema enum is output_message, despite prose saying message. Validate it as its own variant; separately documented conversation message/assistant is not a guessed alias."
+        },
+        "function_call": {
+          "schema": "OpenAI.ConversationItemFunctionToolCall",
+          "required": ["id", "type", "call_id", "name", "arguments"],
+          "arguments": "JSON string; closed tool contracts are separate from transport parsing.",
+          "optional": ["namespace", "status"],
+          "currentDocumentationExtensions": ["caller", "async"],
+          "boundary": "Programmatic/asynchronous callers are outside the approved ordinary function subset."
+        },
+        "function_call_output": {
+          "schema": "OpenAI.ConversationItemFunctionToolCallOutput",
+          "required": ["id", "type", "output"],
+          "optional": ["call_id", "name", "namespace", "caller", "status"],
+          "output": "string or typed output-content array; application subset remains validated string only.",
+          "boundary": "Service permits absent call_id; application requires it to match an authorized call. This is a stricter admission rule, not a claim about a service-required field."
+        },
+        "reasoning": {
+          "schema": "OpenAI.OutputItemReasoningItem",
+          "required": ["type", "id", "summary"],
+          "summary": "Array of summary_text items, each requiring type and text strings.",
+          "optional": ["encrypted_content", "content", "status"],
+          "content": "Array of reasoning_text items, each requiring type and text strings.",
+          "encrypted_content": "Opaque string or null; no claim it supplies observable input accounting."
+        },
+        "configuration_update": {
+          "schema": "OpenAI.ConversationItemResponseConfigurationUpdate",
+          "required": ["type", "id"],
+          "optional": ["reasoning"],
+          "reasoning": "Object with optional effort, a nullable documented enum: none/minimal/low/medium/high/xhigh/max.",
+          "effect": "Changes response reasoning configuration until replaced. No agent_reference, instructions or tools property is documented on this item.",
+          "admission": "Reject this item in the initial fixed-configuration profile. Its existence is documented; runtime configuration changes are not enabled by this application."
+        }
+      },
+      "historyAdmissionProfile": {
+        "state": "Pinned offline subset; implementation belongs to the managed history task and private compatibility remains a release gate.",
+        "messages": "Accept separately documented message (user/assistant only) and output_message (assistant only); require id, completed status and content array. Do not rewrite type or role.",
+        "text": "User input_text and assistant output_text require text strings. Assistant annotations/logprobs must be absent or empty; refusal is terminal, never reusable success. Phase, when present, is commentary or final_answer.",
+        "functions": "Require id/type/call_id/name/arguments for calls and id/type/call_id/output for results. Arguments and output are strings validated by the pinned workload schemas; result correlation is mandatory. Caller absent/null/direct only, namespace absent, async absent/false, status absent/completed.",
+        "reasoning": "Only documented summary_text and reasoning_text arrays; encrypted_content absent/null only. Reject opaque data rather than treating a summary as complete observable history.",
+        "configurationUpdates": "Reject; never ignore, strip or replay a changed configuration.",
+        "closedShapes": "Unknown fields/types/content, duplicate keys/IDs, uncorrelated outputs and edited workload content fail closed. No ignored opaque fields.",
+        "failure": "conversation_history_invalid; retire, suppress output and queue cleanup before any subsequent submission.",
+        "accounting": "Count exact validated observable history and identifiers plus manifest instructions/tools/configuration; no claim to account for invisible service inference."
+      },
+      "state": "Missing configuration schema found in current official Microsoft reference. Context-specific message and optional service call_id distinctions resolve static blockers without broadening the admitted application subset."
+    },
+    "deletion": {
+      "conversationDeleteResponse": {
+        "object": "conversation.deleted",
+        "deleted": true,
+        "id": "exact requested conversation ID"
+      },
+      "cascadeDeletion": "not established",
+      "physicalErasureSla": "not established",
+      "acceptance": "Verify item and response absence separately; retain unresolved cleanup metadata."
+    }
+  },
+  "controlPlane": {
+    "azureRmProviderVersion": "4.81.0",
+    "cognitiveServicesApiVersion": "2026-03-01",
+    "account": {
+      "kind": "AIServices",
+      "project_management_enabled": true,
+      "local_auth_enabled": false,
+      "public_network_access_enabled": false,
+      "network_injection": {
+        "scenario": "agent",
+        "subnet_id": "dedicated approved subnet ARM ID"
+      },
+      "source": "https://raw.githubusercontent.com/hashicorp/terraform-provider-azurerm/v4.81.0/website/docs/r/cognitive_account.html.markdown"
+    },
+    "project": {
+      "resource": "azurerm_cognitive_account_project",
+      "requiredProperties": ["name", "cognitive_account_id", "location", "identity"],
+      "source": "https://raw.githubusercontent.com/hashicorp/terraform-provider-azurerm/v4.81.0/website/docs/r/cognitive_account_project.html.markdown"
+    },
+    "capabilityHostSchemas": [
+      {
+        "type": "Microsoft.CognitiveServices/accounts/capabilityHosts@2026-03-01",
+        "properties": ["capabilityHostKind", "customerSubnet", "enablePublicHostingEnvironment", "storageConnections", "threadStorageConnections", "vectorStoreConnections", "aiServicesConnections", "description", "tags"],
+        "capabilityHostKind": "Agents",
+        "source": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-03-01/accounts/capabilityhosts"
+      },
+      {
+        "type": "Microsoft.CognitiveServices/accounts/projects/capabilityHosts@2026-03-01",
+        "properties": ["storageConnections", "threadStorageConnections", "vectorStoreConnections", "aiServicesConnections"],
+        "source": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-03-01/accounts/projects/capabilityhosts"
+      }
+    ],
+    "capabilityProvider": "AzureRM 4.81.0 ARM-template deployment owns account/project. Actual project capabilitySettings were ignored; the separately recorded additive native compatibility prerequisite owns three AAD connections and one project capability host, reusing the automatic account host. Durable default orchestration remains incomplete.",
+    "capabilityHostCompatibilityObservation": {
+      "source": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/virtual-networks",
+      "revision": "c7776ee8f46821db735f0007e4146543df10f3fb",
+      "officialSampleRevision": "d88d0d97133a1e37a0ac289135645bb243020a8a",
+      "result": "The documented backward-compatible project-managed-identity provisioning route created the exact three AAD resource connections, project Agents host, two private Blob containers and enterprise_memory. The temporary account Blob data grant was removed before any agent execution.",
+      "agentBlobName": "Actual generated name is workspace GUID, hyphen, 12 lowercase hex characters, then -azureml-agent. Record the exact private readback; reject foreign workspaces or other suffixes without broader data grants.",
+      "limitation": "Only the three Classic-named Cosmos containers are present after capability-host creation. New agent-definitions-v1/run-state-v1 creation and New API routing to these BYO stores remain unverified. No agent has been published and no New-runtime success is claimed."
+    },
+    "capabilitySettingsSchemaCandidate": {
+      "apiVersion": "2026-09-15-preview",
+      "accountSource": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-09-15-preview/accounts",
+      "projectSource": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-09-15-preview/accounts/projects",
+      "properties": {
+        "capabilitySettings.blobStore": "Azure Storage account resource ID for agent files/artifacts",
+        "capabilitySettings.documentStore": "Cosmos DB resource ID for agent runtime state",
+        "capabilitySettings.vectorStore": "Azure AI Search resource ID for retrieval/indexing"
+      },
+      "projectMutability": "create time only; omitted fields inherit account defaults",
+      "state": "Both July and September writes rejected the documented vectorStore ID on the account. Omitting account defaults allowed account/project creation, but project GET omitted capabilitySettings and no stores/connections were provisioned. The documented compatibility-host prerequisite created BYO connections/stores; New runtime compatibility remains unverified.",
+      "storeBindingScope": "Explicit complete project capability settings at creation; no account defaults, partial inheritance, name-only values or Microsoft-managed store fallback.",
+      "compatibilitySpecification": {
+        "source": "https://github.com/Azure/azure-rest-api-specs/blob/a146caa4569e6b690faea032d6e98571bd9d8eaf/specification/cognitiveservices/resource-manager/Microsoft.CognitiveServices/CognitiveServices/preview/2026-09-15-preview/cognitiveservices.json",
+        "result": "CapabilitySettings explicitly uses format arm-id and exact allowed resource types for blobStore, documentStore and vectorStore in both previews.",
+        "scopeContract": "AccountProperties.capabilitySettings is optional reusable defaults. ProjectProperties.capabilitySettings is an effective create-time override; omitted fields inherit account defaults when present.",
+        "limitation": "Native validation and what-if did not detect either account write-time rejection; actual project-only provisioning and exact private store/runtime readback are required."
+      },
+      "officialJsonSchema": {
+        "source": "https://raw.githubusercontent.com/Azure/azure-resource-manager-schemas/main/schemas/2026-07-15-preview/Microsoft.CognitiveServices.json",
+        "sha256": "627bf149f6663d7c2a176bfa9955abea01d39d929271dc3ea7e8e8c87fbd9e70",
+        "validator": "jsonschema 4.25.1 / JSON Schema draft-04",
+        "result": "Account and project example bodies pass; numeric documentStore fails for each.",
+        "limitation": "Official schema permits unknown properties; this is not closed-shape validation, provider compatibility or live proof.",
+        "hostedSchemaEndpoint": "Returned 404; official public GitHub schema was retrieved and content-hashed."
+      },
+      "earlierApiComparison": "Neither stable 2026-09-01 nor provider-supported preview 2026-05-15-preview documents capabilitySettings.",
+      "documentationLead": "Localized search results identified the preview API; direct localized and English setup fetches still redirect. Only the directly retrieved ARM references establish these fields."
+    },
+    "capabilityProviderCandidate": {
+      "source": "Azure/azapi",
+      "version": "2.13.0",
+      "publishedAt": "2026-09-28T08:14:56.427406Z",
+      "evidence": "https://registry.terraform.io/v1/providers/Azure/azapi",
+      "state": "Installed only in an isolated session probe. terraform validate rejects 2026-07-15-preview for account and project; latest embedded preview is 2026-05-15-preview. No repository provider manifest changed and schema validation was not disabled."
+    },
+    "alternativeDeploymentRouteCandidate": {
+      "resource": "azurerm_resource_group_template_deployment",
+      "providerVersion": "4.81.0",
+      "source": "https://raw.githubusercontent.com/hashicorp/terraform-provider-azurerm/v4.81.0/website/docs/r/resource_group_template_deployment.html.markdown",
+      "state": "User selected preview-arm-template. Isolated AzureRM 4.81.0 init, validate and one mocked plan-only test pass. Repository implementation and native ARM/private proof remain pending. No provisioning authorization.",
+      "proposedBoundary": "Account/project only, single Terraform owner, exact documented preview API, Incremental mode, no request/response debug content.",
+      "requiredProtections": "Disable automatic nested-item deletion, prevent unexpected replacement/destruction, verify exact fields separately from permissive official schemas, and require native ARM validation/what-if and current private policy/cost/plan confirmation before apply.",
+      "limitation": "Template resource lifecycle and drift visibility differ from directly managed resources; tests and operator evidence must cover them."
+    },
+    "connectionSchema": {
+      "type": "Microsoft.CognitiveServices/accounts/projects/connections@2026-03-01",
+      "authType": "AAD",
+      "credentials": "omitted",
+      "source": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/2026-03-01/accounts/projects/connections",
+      "state": "Legacy AAD union documented for reference, not a second connection owner. Current standard setup says capabilitySettings provisions service-managed connections; verify their authentication privately and reject key-backed connections."
+    },
+    "capabilitySettingsDocumentation": {
+      "source": "https://learn.microsoft.com/azure/foundry/agents/concepts/standard-agent-setup",
+      "linkedSettingsPage": "https://learn.microsoft.com/azure/foundry/how-to/configure-capability-settings",
+      "observedRedirect": "https://learn.microsoft.com/azure/foundry/agents/environment-setup",
+      "standardSetupDocumentationCommit": "0312d552e02dc0983beccdf0c82ca158dcf40436",
+      "provisioning": "Current standard setup explicitly says capabilitySettings provisions the underlying stores and connections; project GET verifies inherited settings. New runtime uses agent-definitions-v1 and run-state-v1, not Classic containers.",
+      "callerRolesDocumented": ["Storage Blob Data Contributor on referenced storage account", "Cosmos DB Operator on referenced Cosmos account"],
+      "state": "Linked detailed guide still redirects; direct standard-setup guide and exact preview ARM schemas establish the offline route. Capacity, runtime role scope and private/keyless compatibility remain preflight/release evidence; contradictory RU/s examples are not a capacity selection."
+    },
+    "officialSampleComparison": {
+      "source": "https://raw.githubusercontent.com/microsoft-foundry/foundry-samples/main/infrastructure/infrastructure-setup-bicep/43-standard-agent-setup-with-customization/modules-standard/add-project-capability-host.bicep",
+      "sampleApiVersion": "2025-04-01-preview",
+      "sampleProjectPropertyAbsentFromPinnedSchema": "capabilityHostKind",
+      "aadConnectionSource": "https://raw.githubusercontent.com/microsoft-foundry/foundry-samples/main/infrastructure/infrastructure-setup-bicep/43-standard-agent-setup-with-customization/modules-standard/ai-project-identity.bicep",
+      "documentedConnectionAuthType": "AAD",
+      "state": "Sample establishes AAD connection examples, not private New-runtime compatibility at the pinned schema."
+    },
+    "runtimeGrantDiscovery": {
+      "identitySource": "https://raw.githubusercontent.com/microsoft-foundry/foundry-samples/main/infrastructure/infrastructure-setup-bicep/43-standard-agent-setup-with-customization/modules-standard/ai-project-identity.bicep",
+      "formatSource": "https://raw.githubusercontent.com/microsoft-foundry/foundry-samples/main/infrastructure/infrastructure-setup-bicep/43-standard-agent-setup-with-customization/modules-standard/format-project-workspace-id.bicep",
+      "roleSource": "https://learn.microsoft.com/azure/foundry/agents/concepts/standard-agent-setup",
+      "identity": "Read-only ARM reference outputs: project identity.principalId GUID and properties.internalId with exactly 32 hexadecimal characters; format the latter as lowercase 8-4-4-4-12 workspace GUID.",
+      "blobDataScopes": ["<workspace-guid>-azureml-blobstore: Storage Blob Data Contributor", "<workspace-guid>-azureml-agent: Storage Blob Data Owner"],
+      "cosmosDataScope": "/dbs/enterprise_memory: Cosmos DB Built-in Data Contributor",
+      "managementScopes": ["Cosmos DB Operator: referenced Cosmos account", "Storage Account Contributor: referenced Storage account", "Search Index Data Contributor: referenced Search service", "Search Service Contributor: referenced Search service", "Cognitive Services OpenAI User: Foundry model account"],
+      "scopeReadback": "Read-only ARM references return the existing project-container IDs and publicAccess ACLs (Storage API 2025-08-01), plus the existing enterprise_memory database ID (Cosmos API 2024-08-15). Blob grants use returned IDs only when they equal the exact expected project scopes and both ACLs are None; Cosmos data grants require exact account/database identity. Missing service resources fail the references; no independent resource owner is created.",
+      "scopeReferenceSources": ["https://raw.githubusercontent.com/hashicorp/terraform-provider-azurerm/v4.81.0/website/docs/d/storage_container.html.markdown", "https://raw.githubusercontent.com/hashicorp/terraform-provider-azurerm/v4.81.0/website/docs/d/cosmosdb_sql_database.html.markdown"],
+      "outputBoundary": "Closed template permits two string identity outputs and one exact object of existing scope IDs/ACLs, with exact read-only reference expressions; no secrets, listKeys, arbitrary expressions or additional owners.",
+      "failure": "Missing/malformed identity prevents runtime grants; no supplied workspace ID, broad Blob data role or account-wide Cosmos data fallback.",
+      "limitation": "Official sample uses 2025-04-01-preview and suppresses BCP053 for internalId. The pinned project data source and public GET reference do not document internalId. This is sample-backed fail-closed discovery, not a preview response-schema guarantee. Private native execution must verify this property, exact generated containers/database, AAD connections and grant ordering before release.",
+      "operatorPrivileges": {
+        "publisher": "Separate managed identity, project-scoped custom agent read/write/delete only, plus project metadata read.",
+        "evaluator": "Separate managed identity, project-scoped custom AIServices/evaluations and OpenAI/evals read/write only, plus project metadata read; no agent mutation, direct inference, stores or role assignments.",
+        "permissionEvidence": "Read-only Microsoft.CognitiveServices provider operation catalog on 2026-11-03 lists these exact data actions; their existence does not prove private endpoint authorization or evaluator catalog compatibility."
+      }
+    }
+  },
+  "evaluation": {
+    "api": "project /openai/v1/evals; evaluator catalog /evaluators uses api-version=v1",
+    "sources": [
+      "https://learn.microsoft.com/azure/foundry/reference/rest/evals-create-eval",
+      "https://learn.microsoft.com/azure/foundry/reference/rest/evals-create-eval-run",
+      "https://learn.microsoft.com/azure/foundry/reference/rest/evals-get-eval-run-output-item",
+      "https://learn.microsoft.com/azure/foundry/reference/rest/evaluators-list-versions",
+      "https://learn.microsoft.com/azure/foundry/reference/rest/evaluators-get-version",
+      "https://learn.microsoft.com/azure/foundry/concepts/evaluation-evaluators/rag-evaluators",
+      "https://learn.microsoft.com/azure/foundry/concepts/evaluation-regions-limits-virtual-network"
+    ],
+    "criteriaType": "azure_ai_evaluator",
+    "criteriaRequired": ["type", "name", "evaluator_name"],
+    "criteriaVersionField": "evaluator_version",
+    "criteriaVersionSource": "https://raw.githubusercontent.com/Azure/azure-sdk-for-python/31a11cf569c9e8c2eaa50dce985bbdae6257c7b5/sdk/ai/azure-ai-projects/azure/ai/projects/models/_patch_evaluation_typeddicts.py",
+    "names": ["builtin.relevance", "builtin.groundedness"],
+    "actualVersions": "Unresolved; list/read private catalog before publication, then freeze exact version/content identity. Omission selects latest and is forbidden.",
+    "initialization": {
+      "parameter": "deployment_name",
+      "value": "exact approved judge model deployment name",
+      "evidence": "Evaluator-specific RAG reference and both exact-revision Python samples agree. Generic model examples are not this profile.",
+      "sampleRevision": "31a11cf569c9e8c2eaa50dce985bbdae6257c7b5",
+      "samplePaths": [
+        "sdk/ai/azure-ai-projects/samples/evaluations/agentic_evaluators/sample_groundedness.py",
+        "sdk/ai/azure-ai-projects/samples/evaluations/agentic_evaluators/sample_relevance.py"
+      ],
+      "liveGate": "Validate this exact object and data mapping against the retrieved version definition.init_parameters/data_schema before publishing; unsupported or absent schema refuses publication, never switches parameter names."
+    },
+    "catalogReadContract": {
+      "list": "GET /evaluators/{name}/versions?api-version=v1; value array and optional nextLink",
+      "read": "GET /evaluators/{name}/versions/{version}?api-version=v1; 404 means missing",
+      "definitionFields": ["init_parameters", "data_schema", "metrics"],
+      "identity": "Require exact name/version, builtin evaluator_type and supported 1-5 metric; hash the full definition/configuration in release evidence.",
+      "pagination": "Follow only the selected HTTPS project origin and evaluator route; incomplete catalog is not success.",
+      "source": "https://ai.azure.com/api-reference/llm/evaluators/get-version.md"
+    },
+    "mappings": {
+      "relevance": ["query", "response"],
+      "groundedness": ["query", "response", "context"]
+    },
+    "documentedScoreScale": {"minimum": 1, "maximum": 5, "passingMinimum": 3},
+    "normalizedScoreAdapter": "Use 1+4*x only for a separately documented exact evaluator version with normalized 0..1 scale; do not infer scale from numeric value.",
+    "createEvalRequired": ["data_source_config", "testing_criteria"],
+    "createRunRequired": ["data_source"],
+    "precomputedSource": "jsonl source file_content wraps each frozen captured row as item; file_id is also documented. No target invocation or automatic rerun.",
+    "outputItemRequired": ["object", "id", "run_id", "eval_id", "created_at", "status", "datasource_item_id", "datasource_item", "results", "sample"],
+    "resultRequired": ["name", "score", "passed"],
+    "resultBoundary": "Validate exact run/eval/row/evaluator identity and all 24 finite in-range metrics; never export sample content or judge reason to metadata SQL.",
+    "regionalDocumentation": "Sweden Central is listed for batch evaluations and safety evaluators; this does not prove the configured private topology.",
+    "state": "Offline operation, mapping, initialization parameter, version field and score contract pinned. Concrete private catalog versions/definitions are obtained and frozen before publication; private execution remains unverified."
+  },
+  "remainingImplementationAndReleaseChecks": [
+    "Implement the pinned closed history subset and prove actual list-item compatibility privately; unexpected shapes retire, never bypass validation.",
+    "Implement capabilitySettings single ownership and inspect generated Entra-only connections privately; do not combine legacy host provisioning.",
+    "Native ARM validate/what-if and current capacity/quota/cost/policy plus exact plan confirmation before provisioning.",
+    "Read, validate and freeze exact private evaluator versions/definitions/configuration before publication; no latest fallback.",
+    "Repository transport/infra implementation and owning full suites; isolated selected-route provider proof passed.",
+    "Private proof of bounded metadata recovery and noncascade deletion."
+  ]
+}

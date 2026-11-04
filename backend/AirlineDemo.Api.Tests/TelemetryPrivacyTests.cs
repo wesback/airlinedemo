@@ -19,6 +19,9 @@ namespace AirlineDemo.Api.Tests;
 
 public sealed class TelemetryPrivacyTests
 {
+    private static readonly IReadOnlySet<string> TestApprovedSourceAttributes =
+        new HashSet<string>(["case.id", "event.outcome"], StringComparer.Ordinal);
+
     [Theory]
     [InlineData("unknown-outcome", "presenter")]
     [InlineData("success", "unknown-role")]
@@ -70,7 +73,7 @@ public sealed class TelemetryPrivacyTests
         services.AddLogging(logging => logging.AddOpenTelemetry(o =>
         {
             o.IncludeFormattedMessage = true;
-            o.AddRedaction();
+            o.AddRedaction(TestApprovedSourceAttributes);
             o.AddProcessor(new PipelineLogSink(logs));
         }));
         using var loggers = services.BuildServiceProvider();
@@ -80,6 +83,7 @@ public sealed class TelemetryPrivacyTests
         {
             ["passcode"] = Canaries[2],
             ["case.id"] = "scope-case-5521",
+            ["event.outcome"] = "success",
         }))
         {
             logger.LogInformation(
@@ -90,7 +94,7 @@ public sealed class TelemetryPrivacyTests
 
         using var tracing = Sdk.CreateTracerProviderBuilder()
             .AddSource(TelemetryRedaction.ServiceName)
-            .AddRedaction()
+            .AddRedaction(TestApprovedSourceAttributes)
             .AddProcessor(new PipelineSpanSink(spans))
             .Build();
         using var source = new ActivitySource(TelemetryRedaction.ServiceName);
@@ -100,7 +104,7 @@ public sealed class TelemetryPrivacyTests
             activity.SetTag("gen_ai.prompt", Canaries[0]);
             activity.SetTag("document.text", Canaries[1]);
             activity.SetTag("case.id", "trace-case-8810");
-            activity.AddEvent(new ActivityEvent("review.event", tags: new ActivityTagsCollection(new Dictionary<string, object?>
+            activity.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection(new Dictionary<string, object?>
             {
                 ["passcode"] = Canaries[2],
                 ["auth"] = "Bearer " + Canaries[4],
@@ -124,8 +128,9 @@ public sealed class TelemetryPrivacyTests
         Assert.DoesNotContain("eyJhbGciOi.eyJzdWIiOiIx.c2lnbmF0dXJl", output);
 
         Assert.Contains("scope-case-5521", logOutput);
-        Assert.Contains("approved", logOutput);
-        Assert.Contains("theme=dark", logOutput);
+        Assert.Contains("event.outcome=success", logOutput);
+        Assert.DoesNotContain("approved", logOutput);
+        Assert.DoesNotContain("theme=dark", logOutput);
         Assert.Contains("trace-case-8810", spanOutput);
         Assert.Contains("case.id=trace-case-8810", spanOutput);
     }

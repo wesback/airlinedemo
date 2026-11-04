@@ -7,6 +7,7 @@ using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Evidence.PdfWorker;
+using AirlineDemo.Api.Foundry;
 using AirlineDemo.Api.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.AI;
@@ -69,8 +70,10 @@ public sealed class WorkloadAdmissionLimitsTests
         Assert.True(condition());
     }
 
-    private static WebApplicationFactory<Program> CreateFactory(WorkloadAdmissionLimits limits, IChatClient? chat = null) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+    private static WebApplicationFactory<Program> CreateFactory(WorkloadAdmissionLimits limits, IChatClient? chat = null)
+    {
+        var managedChat = chat ?? new CountingChatClient();
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -81,7 +84,13 @@ public sealed class WorkloadAdmissionLimitsTests
                     // early, and a test that reads a case another test created passes or fails with the order the tests run in.
                     ["CaseState:Path"] = Path.Combine(Path.GetTempPath(), $"workload-limits-{Guid.NewGuid():N}.json"),
                 }));
-            builder.ConfigureTestServices(services => services.AddSingleton<IChatClient>(chat ?? new CountingChatClient()));
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddSingleton<IChatClient>(managedChat);
+                services.AddSingleton<IManagedProjectClient>(new CopilotQuestionTests.ScriptedManagedProjectClient(managedChat));
+                services.AddSingleton<IManagedConversationStore>(
+                    new CopilotQuestionTests.MemoryManagedConversationStore(TimeProvider.System));
+            });
             builder.ConfigureTestServices(services => services.AddSingleton(FakeApprovedManifest.Approved()));
             // The test host runs as root on Linux, so point the isolated PDF worker at this test assembly.
             builder.ConfigureTestServices(services => services.AddSingleton(new IsolatedPdfParserOptions
@@ -91,6 +100,7 @@ public sealed class WorkloadAdmissionLimitsTests
             }));
             builder.ConfigureTestServices(services => services.AddSingleton(limits));
         });
+    }
 
     private static async Task<Session> SignInAsync(HttpClient client, string userId)
     {
@@ -297,13 +307,13 @@ public sealed class WorkloadAdmissionLimitsTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
         await WaitUntilAsync(() => TwoSlotsFree(limits));
 
-        // Exception: the endpoint releases its slot when the investigation throws.
+        // An uncertain managed-provider failure escalates the package and releases its slot.
         chat.Gate = NewGate();
         var faulted = PostPackageAsync(client, presenter, bytes: TextPdf(5));
         await WaitUntilAsync(() => chat.Entered == 4);
         chat.Gate.SetException(new InvalidOperationException("boom"));
         using var failed = await faulted;
-        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, failed.StatusCode);
         await WaitUntilAsync(() => TwoSlotsFree(limits));
 
         // After every release the endpoint is admitted again.

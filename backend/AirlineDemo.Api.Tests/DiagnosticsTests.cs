@@ -1,16 +1,25 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
+using System.Net;
+using System.Text.Json.Nodes;
 using AirlineDemo.Api.Diagnostics;
+using AirlineDemo.Api.Evaluation;
+using AirlineDemo.Api.Foundry;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using OpenTelemetry.Logs;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 namespace AirlineDemo.Api.Tests;
 
 public sealed class DiagnosticsTests
 {
+    private static readonly IReadOnlySet<string> TestApprovedSourceAttributes =
+        new HashSet<string>(["case.id", "event.outcome"], StringComparer.Ordinal);
     private const string Passcode = "SENTINEL-PASSCODE-7731";
     private const string CookieValue = "SENTINEL-COOKIE-VALUE";
     private const string BearerValue = "SENTINEL-BEARER-VALUE";
@@ -46,9 +55,11 @@ public sealed class DiagnosticsTests
             using var provider = services.BuildServiceProvider();
             var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
             var tracerProvider = provider.GetRequiredService<TracerProvider>();
+            var meterProvider = provider.GetRequiredService<MeterProvider>();
 
             Assert.True(ContainsObjectOfType(loggerFactory, "AzureMonitorLogExporter"), "Log exporter was not registered.");
             Assert.True(ContainsObjectOfType(tracerProvider, "AzureMonitorTraceExporter"), "Trace exporter was not registered.");
+            Assert.True(ContainsObjectOfType(meterProvider, "AzureMonitorMetricExporter"), "Metric exporter was not registered.");
         }
         finally
         {
@@ -70,6 +81,7 @@ public sealed class DiagnosticsTests
             Assert.Empty(services);
             Assert.Null(provider.GetService<ILoggerFactory>());
             Assert.Null(provider.GetService<TracerProvider>());
+            Assert.Null(provider.GetService<MeterProvider>());
         }
         finally
         {
@@ -194,14 +206,14 @@ public sealed class DiagnosticsTests
         {
             o.IncludeFormattedMessage = true;
             o.IncludeScopes = true;
-            o.AddRedaction();
+            o.AddRedaction(TestApprovedSourceAttributes);
             o.AddProcessor(new CaptureLogs(captured));
         }));
 
         using var provider = services.BuildServiceProvider();
         var logger = provider.GetRequiredService<ILogger<DiagnosticsTests>>();
 
-        logger.LogInformation("Case {CaseId} state {State}", "case-42", "approved");
+        logger.LogInformation("Case {case.id} state {State}", "case-42", "approved");
         logger.LogInformation(
             "Attempt {Passcode} cookie {Cookie} bearer {Auth} jwt {Jwt} prompt {Prompt} doc {Document}",
             Passcode, CookieValue, $"Bearer {BearerValue}", Jwt, PromptText, DocumentText);
@@ -211,6 +223,7 @@ public sealed class DiagnosticsTests
             ["__Host-session"] = CookieValue,
             [".AspNetCore.Cookies"] = CookieValue,
             ["case.id"] = "scope-case-5521",
+            ["event.outcome"] = "success",
         }))
         {
             logger.LogInformation("Scoped event {State}", "approved");
@@ -244,9 +257,10 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain(DocumentText, output);
         Assert.DoesNotContain(NamedValue, output);
         Assert.Contains("named-case-9", attributes);
-        Assert.Contains("case-42", attributes);
+        Assert.Contains("case.id=case-42", attributes);
         Assert.Contains("case.id=scope-case-5521", attributes);
-        Assert.Contains("approved", attributes);
+        Assert.Contains("event.outcome=success", attributes);
+        Assert.DoesNotContain("approved", attributes);
         Assert.All(captured, r => Assert.Equal("diagnostic event", r.Message));
 
         // Sensitive entries must be dropped by name, not merely given placeholder values.
@@ -271,7 +285,7 @@ public sealed class DiagnosticsTests
         {
             o.IncludeFormattedMessage = true;
             o.IncludeScopes = true;
-            o.AddRedaction();
+            o.AddRedaction(TestApprovedSourceAttributes);
             o.AddProcessor(new CaptureLogs(captured));
         }));
 
@@ -314,13 +328,13 @@ public sealed class DiagnosticsTests
         // With structured data, only the allowlisted error.type is exported for the exception.
         captured.Clear();
         // AC-05: the formatted message carries a canary alongside the safe structured property Case.
-        logger.LogError(thrown, $"Operation failed {FormattedCanary} for {{Case}}", "case-42");
+        logger.LogError(thrown, $"Operation failed {FormattedCanary} for {{case.id}}", "case-42");
         Assert.All(captured, r => Assert.Equal("diagnostic event", r.Message));
         var structured = string.Join("\n", captured.SelectMany(r => r.Attributes.Select(a => $"{a.Key}={a.Value}"))
             .Concat(captured.Select(r => r.Message))
             .Concat(captured.Select(r => r.FormattedMessage ?? string.Empty))
             .Concat(captured.Select(r => r.ExceptionText ?? string.Empty)));
-        Assert.Contains("case-42", structured);
+        Assert.Contains("case.id=case-42", structured);
         Assert.Contains("error.type=invalid-operation", structured);
         Assert.DoesNotContain(FormattedCanary, structured);
         Assert.DoesNotContain(ExceptionCanary, structured);
@@ -374,7 +388,7 @@ public sealed class DiagnosticsTests
         {
             o.IncludeFormattedMessage = true;
             o.IncludeScopes = true;
-            o.AddRedaction();
+            o.AddRedaction(TestApprovedSourceAttributes);
             o.AddProcessor(new CaptureLogs(captured));
         }));
 
@@ -402,7 +416,7 @@ public sealed class DiagnosticsTests
         using var source = new ActivitySource(TelemetryRedaction.ServiceName);
         using var providers = Sdk.CreateTracerProviderBuilder()
             .AddSource(TelemetryRedaction.ServiceName)
-            .AddRedaction()
+            .AddRedaction(TestApprovedSourceAttributes)
             .AddProcessor(new CaptureActivities(captured))
             .Build();
 
@@ -415,7 +429,7 @@ public sealed class DiagnosticsTests
             activity.SetTag(".AspNetCore.Cookies", CookieValue);
             activity.SetTag("__Host-session", CookieValue);
             activity.SetTag("case.id", "case-42");
-            activity.AddEvent(new ActivityEvent("review.event", tags: new ActivityTagsCollection(new Dictionary<string, object?>
+            activity.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection(new Dictionary<string, object?>
             {
                 ["prompt"] = PromptText,
                 ["document.text"] = DocumentText,
@@ -469,6 +483,130 @@ public sealed class DiagnosticsTests
         Assert.DoesNotContain("xyzabc12", text);
     }
 
+    [Fact]
+    public async Task ManagedTelemetry_MetadataOnlyAtExporterBoundary()
+    {
+        const string conversationId = "conv_telemetry_123";
+        const string responseId = "resp_telemetry_456";
+        const string prompt = "SENTINEL-MANAGED-PROMPT";
+        const string output = "SENTINEL-MANAGED-OUTPUT";
+        const string exceptionText = "SENTINEL-MANAGED-EXCEPTION";
+        const string eventName = "SENTINEL-MANAGED-EVENT-NAME";
+        const string eventValue = "SENTINEL-MANAGED-EVENT-VALUE";
+
+        var logs = new List<CapturedLog>();
+        var spans = new List<Activity>();
+        var measurements = new List<(string Name, object Value, string Unit, KeyValuePair<string, object?>[] Tags)>();
+        var settings = new Dictionary<string, string?>
+        {
+            [DiagnosticsSetup.ConnectionStringSetting] =
+                "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=http://127.0.0.1:1/",
+            ["Telemetry:Environment"] = Environments.Development,
+            ["ModelGateway:Endpoint"] = "https://gateway.private.invalid/",
+            ["ModelGateway:Audience"] = "api://managed-gateway",
+            ["Foundry:GatewayEndpoint"] = "https://gateway.private.invalid/foundry/projects/airline-demo",
+            ["Foundry:ProjectName"] = "airline-demo",
+            ["Foundry:Agents:copilot:Name"] = "airline-copilot",
+            ["Foundry:Agents:copilot:Version"] = "1",
+            ["Foundry:Agents:copilot:ConfigurationId"] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        };
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        var services = new ServiceCollection();
+        services.AddAirlineDiagnostics(configuration);
+        services.AddLogging(logging => logging.AddOpenTelemetry(options => options.AddProcessor(new CaptureLogs(logs))));
+        services.AddOpenTelemetry().WithTracing(tracing => tracing.AddProcessor(new CaptureActivities(spans)));
+
+        using var provider = services.BuildServiceProvider();
+        using var tracerProvider = provider.GetRequiredService<TracerProvider>();
+        var logger = provider.GetRequiredService<ILogger<DiagnosticsTests>>();
+        var handler = new ManagedTelemetryHandler(logger, prompt, output, exceptionText, eventName, eventValue, responseId);
+        var clientFactory = new FixedHttpClientFactory(handler);
+        var client = new ManagedProjectClient(configuration, clientFactory, () => new TestTokenCredential());
+        using var activitySource = new ActivitySource(TelemetryRedaction.ServiceName);
+        using var parentActivity = activitySource.StartActivity("invoke_agent");
+        Assert.NotNull(parentActivity);
+        var tokenMeasurements = new List<(long Value, KeyValuePair<string, object?>[] Tags)>();
+        var durationMeasurements = new List<(double Value, KeyValuePair<string, object?>[] Tags)>();
+        using var meterListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (instrument.Meter.Name == TelemetryRedaction.ManagedAgentMeterName)
+                    listener.EnableMeasurementEvents(instrument);
+            },
+        };
+        meterListener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+            tokenMeasurements.Add((value, tags.ToArray())));
+        meterListener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
+            durationMeasurements.Add((value, tags.ToArray())));
+        meterListener.Start();
+
+        const string configurationId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var correlation = new GatewayCorrelation("copilot", "run-1", "managed", "case-1", configurationId, "v1", "call-1");
+        var input = new JsonArray(new JsonObject
+        {
+            ["type"] = "message",
+            ["role"] = "user",
+            ["content"] = prompt,
+        });
+        var first = await client.CreateResponseAsync("copilot", conversationId, input, correlation, TestContext.Current.CancellationToken);
+        Assert.Equal(responseId, first["id"]!.GetValue<string>());
+        var second = await client.CreateResponseAsync("copilot", conversationId, input, correlation with { CallIdentity = "call-2" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal("resp_telemetry_789", second["id"]!.GetValue<string>());
+
+        var managedSpans = spans.Where(span => span.Source.Name == TelemetryRedaction.ServiceName && span.OperationName == "invoke_agent").ToArray();
+        Assert.Equal(2, managedSpans.Length);
+        Assert.All(managedSpans, span =>
+        {
+            Assert.Contains(span.TagObjects, tag => tag.Key == "gen_ai.agent.name" && (string?)tag.Value == "airline-copilot");
+            Assert.Contains(span.TagObjects, tag => tag.Key == "gen_ai.agent.version" && (string?)tag.Value == "1");
+            Assert.Contains(span.TagObjects, tag => tag.Key == "gen_ai.agent.id" && ((string?)tag.Value)?.StartsWith("ref-", StringComparison.Ordinal) == true);
+            Assert.Contains(span.TagObjects, tag => tag.Key == "gen_ai.conversation.id" && ((string?)tag.Value)?.StartsWith("ref-", StringComparison.Ordinal) == true);
+            Assert.Contains(span.TagObjects, tag => tag.Key == "http.request.method" && (string?)tag.Value == "POST");
+            Assert.Contains(span.TagObjects, tag => tag.Key == "http.response.status_code" && Convert.ToInt32(tag.Value) == 200);
+            Assert.Contains(span.TagObjects, tag => tag.Key == "http.request.resend_count" && Convert.ToInt32(tag.Value) == 0);
+            Assert.All(span.TagObjects.Where(tag => tag.Key == "gen_ai.response.id"),
+                tag => Assert.Matches("^ref-[0-9a-f]{16}$", (string)tag.Value!));
+        });
+        Assert.All(managedSpans, span => Assert.Contains(span.TagObjects, tag => tag.Key == "gen_ai.response.id"
+            && ((string?)tag.Value)?.StartsWith("ref-", StringComparison.Ordinal) == true));
+        Assert.Contains(managedSpans[0].TagObjects, tag => tag.Key == "gen_ai.usage.input_tokens" && Convert.ToInt64(tag.Value) == 11);
+        Assert.Contains(managedSpans[0].TagObjects, tag => tag.Key == "gen_ai.usage.output_tokens" && Convert.ToInt64(tag.Value) == 5);
+        Assert.DoesNotContain(managedSpans[1].TagObjects, tag => tag.Key is "gen_ai.usage.input_tokens" or "gen_ai.usage.output_tokens");
+
+        Assert.Equal(2, durationMeasurements.Count);
+        Assert.All(durationMeasurements, measurement => Assert.True(double.IsFinite(measurement.Value) && measurement.Value >= 0));
+        Assert.Equal([5L, 11L], tokenMeasurements.Select(measurement => measurement.Value).Order().ToArray());
+        Assert.Equal(2, tokenMeasurements.Count);
+        Assert.All(tokenMeasurements.SelectMany(measurement => measurement.Tags), tag =>
+            Assert.Contains(tag.Key, new[] { "gen_ai.token.type" }));
+
+        Assert.NotEmpty(logs);
+        Assert.All(logs, record =>
+        {
+            Assert.NotNull(record.TraceId);
+            Assert.NotNull(record.SpanId);
+            Assert.Equal("diagnostic event", record.Message);
+        });
+        var outputText = string.Join("\n",
+            logs.Select(record => record.Message)
+                .Concat(logs.Select(record => record.FormattedMessage ?? string.Empty))
+                .Concat(logs.Select(record => record.ExceptionText ?? string.Empty))
+                .Concat(logs.SelectMany(record => record.Attributes.Select(attribute => $"{attribute.Key}={attribute.Value}")))
+                .Concat(spans.Select(span => span.DisplayName))
+                .Concat(spans.SelectMany(span => span.TagObjects.Select(tag => $"{tag.Key}={tag.Value}")))
+                .Concat(spans.SelectMany(span => span.Events.Select(activityEvent => activityEvent.Name))
+                    .Concat(spans.SelectMany(span => span.Events.SelectMany(activityEvent =>
+                        activityEvent.Tags?.Select(tag => $"{tag.Key}={tag.Value}") ?? [])))));
+        foreach (var sentinel in new[] { prompt, output, exceptionText, eventName, eventValue, conversationId, responseId })
+            Assert.DoesNotContain(sentinel, outputText);
+        Assert.All(spans.SelectMany(span => span.Events), activityEvent => Assert.Equal("exception", activityEvent.Name));
+        Assert.Equal(2, handler.TraceContexts.Count);
+        Assert.All(handler.TraceContexts, context => Assert.Contains(managedSpans,
+            span => span.TraceId.ToHexString() == context.TraceId && span.SpanId.ToHexString() == context.SpanId));
+    }
+
     private sealed record Holder(string Auth, string Token);
 
     // LogRecord instances are pooled by the SDK, so snapshot the attributes, scopes and rendered message during OnEnd.
@@ -477,7 +615,9 @@ public sealed class DiagnosticsTests
         List<KeyValuePair<string, object?>> Attributes,
         List<KeyValuePair<string, object?>> Scopes,
         string? FormattedMessage = null,
-        string? ExceptionText = null);
+        string? ExceptionText = null,
+        string? TraceId = null,
+        string? SpanId = null);
 
     private sealed class CaptureLogs(List<CapturedLog> sink) : BaseProcessor<LogRecord>
     {
@@ -490,12 +630,80 @@ public sealed class DiagnosticsTests
                 (data.Attributes ?? []).ToList(),
                 [],
                 data.FormattedMessage,
-                data.Exception?.ToString()));
+                data.Exception?.ToString(),
+                data.TraceId.ToHexString(),
+                data.SpanId.ToHexString()));
         }
     }
 
     private sealed class CaptureActivities(List<Activity> sink) : BaseProcessor<Activity>
     {
         public override void OnEnd(Activity data) => sink.Add(data);
+    }
+
+    private sealed class FixedHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
+    }
+
+    private sealed class TestTokenCredential : Azure.Core.TokenCredential
+    {
+        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+            new("synthetic-token", DateTimeOffset.UtcNow.AddMinutes(5));
+
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(
+            Azure.Core.TokenRequestContext requestContext,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(new Azure.Core.AccessToken("synthetic-token", DateTimeOffset.UtcNow.AddMinutes(5)));
+    }
+
+    private sealed class ManagedTelemetryHandler(
+        ILogger logger,
+        string prompt,
+        string output,
+        string exceptionText,
+        string eventName,
+        string eventValue,
+        string responseId) : HttpMessageHandler
+    {
+        private int calls;
+        public List<(string TraceId, string SpanId)> TraceContexts { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var requestBody = await request.Content!.ReadAsStringAsync(cancellationToken);
+            Assert.Contains(prompt, requestBody);
+            var current = Activity.Current ?? throw new InvalidOperationException("The managed request has no active trace span.");
+            TraceContexts.Add((current.TraceId.ToHexString(), current.SpanId.ToHexString()));
+            using (logger.BeginScope(new Dictionary<string, object?>
+            {
+                ["prompt"] = requestBody,
+                ["gen_ai.agent.name"] = "airline-copilot",
+                ["gen_ai.output.messages"] = new Dictionary<string, object?> { ["text"] = output },
+            }))
+            {
+                logger.LogError(new InvalidOperationException(exceptionText), "Managed request {response}", output);
+            }
+
+            Activity.Current?.AddEvent(new ActivityEvent("exception", tags: new ActivityTagsCollection(new Dictionary<string, object?>
+            {
+                ["exception.type"] = "invalid-operation",
+                ["exception.message"] = exceptionText,
+                ["exception.stacktrace"] = eventValue,
+                ["gen_ai.output.messages"] = new Dictionary<string, object?> { ["text"] = output },
+            })));
+            Activity.Current?.AddEvent(new ActivityEvent(eventName, tags: new ActivityTagsCollection(new Dictionary<string, object?>
+            {
+                ["note"] = eventValue,
+            })));
+
+            var responseBody = Interlocked.Increment(ref calls) == 1
+                ? $$$"""{"id":"{{{responseId}}}","output":[{"type":"output_message","content":[{"type":"output_text","text":"{{{output}}}"}]}],"usage":{"input_tokens":11,"output_tokens":5}}"""
+                : $$$"""{"id":"resp_telemetry_789","output":[{"type":"output_message","content":[{"type":"output_text","text":"{{{output}}}"}]}]}""";
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(responseBody),
+            };
+        }
     }
 }

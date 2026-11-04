@@ -10,6 +10,12 @@ export type CopilotConfirmation = {
 };
 export type CopilotAnswer = {
   contractVersion: number; answer: string; citations: CopilotCitation[]; records: CopilotRecord[]; confirmation?: CopilotConfirmation;
+  conversationHandle?: string; conversationState?: 'active' | 'retired';
+};
+export type CopilotHistoryTurn = { question: string; answer: string; citations: CopilotCitation[] };
+export type CopilotConversation = {
+  contractVersion: number; conversationHandle: string; conversationState: 'active'; turnCount: number; expiresAt: string;
+  turns: CopilotHistoryTurn[];
 };
 export type CopilotReceipt = {
   contractVersion: number; proposalId: string; caseId: string; decision: string; revision: number; auditSequence: number; simulated: boolean;
@@ -21,10 +27,20 @@ export type CopilotActivityItem = {
   gate: { name: string; result: string; blockers: string[] } | null;
 };
 export type CopilotActivity = { contractVersion: number; caseId: string; items: CopilotActivityItem[] };
-export type CopilotQuestionBody = { question: string; selectedCaseId?: string; releaseNote?: string };
+export type CopilotQuestionBody = { question: string; selectedCaseId?: string; releaseNote?: string; conversationHandle?: string };
 export type CopilotOutcome<T> = { ok: true; value: T } | { ok: false; status: number; code: string; blockers: string[] };
 
 export const copilotCaseUrl = (caseId: string, suffix: string) => `/api/v1/cases/${encodeURIComponent(caseId)}/copilot${suffix}`;
+
+async function readCopilotResponse<T>(response: Response): Promise<CopilotOutcome<T>> {
+  let payload: unknown = null;
+  try { payload = await response.json(); } catch { payload = null; }
+  if (response.ok && payload && typeof payload === 'object') return { ok: true, value: payload as T };
+  const error = (payload as { error?: { code?: unknown; blockers?: unknown } } | null)?.error;
+  const code = typeof error?.code === 'string' ? error.code : response.ok ? 'invalid_response' : `http_${response.status}`;
+  const blockers = Array.isArray(error?.blockers) ? error.blockers.filter((item): item is string => typeof item === 'string') : [];
+  return { ok: false, status: response.status, code, blockers };
+}
 
 /** POSTs a JSON body with the session anti-forgery token and reads either the value or the closed error code. */
 export async function postCopilot<T>(url: string, csrfToken: string, body: unknown): Promise<CopilotOutcome<T>> {
@@ -38,13 +54,18 @@ export async function postCopilot<T>(url: string, csrfToken: string, body: unkno
   } catch {
     return { ok: false, status: 0, code: 'network_error', blockers: [] };
   }
-  let payload: unknown = null;
-  try { payload = await response.json(); } catch { payload = null; }
-  if (response.ok && payload && typeof payload === 'object') return { ok: true, value: payload as T };
-  const error = (payload as { error?: { code?: unknown; blockers?: unknown } } | null)?.error;
-  const code = typeof error?.code === 'string' ? error.code : response.ok ? 'invalid_response' : `http_${response.status}`;
-  const blockers = Array.isArray(error?.blockers) ? error.blockers.filter((item): item is string => typeof item === 'string') : [];
-  return { ok: false, status: response.status, code, blockers };
+  return readCopilotResponse<T>(response);
+}
+
+/** Reconnects to one opaque, same-owner managed conversation; the server reauthorizes every read. */
+export async function getCopilotConversation(handle: string): Promise<CopilotOutcome<CopilotConversation>> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1/copilot/conversations/${encodeURIComponent(handle)}`);
+  } catch {
+    return { ok: false, status: 0, code: 'network_error', blockers: [] };
+  }
+  return readCopilotResponse<CopilotConversation>(response);
 }
 
 /**
@@ -104,6 +125,18 @@ const messages: Record<string, string> = {
   release_unavailable: 'The release could not be recorded. Try again later.',
   unsupported_media_type: 'The request was not sent as JSON.',
   network_error: 'The server could not be reached. Try again.',
+  invalid_response: 'The server returned a response that could not be used. Try again.',
+  conversation_busy: 'This conversation is still processing. Wait before continuing.',
+  conversation_expired: 'This conversation has expired. Start a new conversation.',
+  conversation_context_mismatch: 'This conversation no longer matches the selected case or your access. Start a new conversation.',
+  conversation_turn_limit: 'This conversation reached its turn limit. Start a new conversation.',
+  conversation_unavailable: 'This conversation is unavailable. Start a new conversation.',
+  conversation_history_invalid: 'Conversation history could not be verified. Start a new conversation.',
+  conversation_store_unavailable: 'Conversation history is temporarily unavailable. Try again later.',
+  conversation_not_found: 'No authorized conversation was found for this handle.',
+  invalid_conversation_handle: 'Enter a valid conversation handle.',
+  managed_refusal: 'The model declined this request. Nothing was changed.',
+  managed_content_filtered: 'The model content filter blocked this request. Nothing was changed.',
 };
 
 export const copilotMessage = (code: string) => messages[code] ?? `The request failed (${code}). Try again.`;

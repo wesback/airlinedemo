@@ -81,6 +81,17 @@ resource "azurerm_container_app_environment" "demo" {
 # Two-phase first deploy: the app is created only once its image is in this registry and its passcode is in this vault.
 locals {
   deploy_application = var.image_digest != null && var.demo_passcode_secret_uri != null
+  foundry_runtime_environment = !var.foundry_enabled || var.foundry_runtime_profile == null ? {} : merge(
+    {
+      Foundry__GatewayEndpoint = "${trimsuffix(local.model_endpoint, "/")}/foundry/projects/${local.foundry_project_name}"
+      Foundry__ProjectName     = local.foundry_project_name
+    },
+    merge([for workload, agent in var.foundry_runtime_profile : {
+      "Foundry__Agents__${workload}__Name"            = agent.name
+      "Foundry__Agents__${workload}__Version"         = agent.version
+      "Foundry__Agents__${workload}__ConfigurationId" = agent.configuration_id
+    }]...)
+  )
 }
 
 resource "azurerm_container_app" "app" {
@@ -196,6 +207,14 @@ resource "azurerm_container_app" "app" {
       env {
         name  = "ModelGateway__ModelVersion"
         value = var.model_version
+      }
+
+      dynamic "env" {
+        for_each = local.foundry_runtime_environment
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
 
       # Prompt Shields through the gateway's contentsafety API, with the same token as the model gateway.

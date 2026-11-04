@@ -42,6 +42,24 @@ public sealed class SourceReadTools(
         }
     }
 
+    internal void ResetManagedWitnesses()
+    {
+        lock (_witnessGate)
+        {
+            _readWitnesses.Clear();
+            _markedPersonalDataFields.Clear();
+            _markedPersonalDataValues.Clear();
+        }
+    }
+
+    internal void RestoreCommittedWitness<TPayload>(SourceRecord<TPayload> record) where TPayload : class
+    {
+        if (!IsValid(record, record.SourceId) || !Allowed(role, record.SourceId))
+            throw new ModelGateException("source record is outside the investigator scope");
+        AddWitness(record);
+        TrackMarkedPersonalData(record);
+    }
+
     internal bool ContainsMarkedPersonalData(string text)
     {
         var normalizedText = NormalizePersonalDataMatch(text);
@@ -223,7 +241,7 @@ public sealed class SourceReadTools(
         return result.ToString();
     }
 
-    private static string SerializeRecord<TPayload>(SourceRecord<TPayload> record) where TPayload : class
+    internal static string SerializeRecord<TPayload>(SourceRecord<TPayload> record) where TPayload : class
     {
         if (record.Payload is RecordsPayload { ContainsPersonalData: true } payload)
         {
@@ -260,7 +278,7 @@ public sealed class SourceReadTools(
     private static bool KnownSource(string sourceId) =>
         sourceId is "technical" or "maintenance" or "finance" or "records" or "contracts";
 
-    private static bool Allowed(string role, string sourceId) => role switch
+    internal static bool Allowed(string role, string sourceId) => role switch
     {
         "technical-reviewer" => sourceId is "technical" or "maintenance" or "records",
         "finance-reviewer" => sourceId is "technical" or "finance",

@@ -89,9 +89,7 @@ public static partial class RedactionFilter
         var result = new List<KeyValuePair<string, object?>>(attributes.Count);
         foreach (var (key, value) in attributes)
         {
-            if (TelemetryRedaction.IsSourceSpecificAttribute(key)
-                && approvedSourceAttributes is not null
-                && !approvedSourceAttributes.Contains(key))
+            if (!TelemetryRedaction.IsAllowedExporterAttribute(key, approvedSourceAttributes))
             {
                 continue;
             }
@@ -102,7 +100,7 @@ public static partial class RedactionFilter
                 continue;
             }
 
-            if (TryRedact(key, value, out var redacted))
+            if (TryRedact(key, value, out var redacted, approvedSourceAttributes))
             {
                 result.Add(new KeyValuePair<string, object?>(key, redacted));
             }
@@ -113,8 +111,18 @@ public static partial class RedactionFilter
 
     // Scalars are scrubbed by their string form. Other objects are omitted (returns false) because their
     // ToString() cannot be proven safe.
-    public static bool TryRedact(string key, object? value, out object? redacted)
+    public static bool TryRedact(
+        string key,
+        object? value,
+        out object? redacted,
+        IReadOnlySet<string>? approvedSourceAttributes = null)
     {
+        if (!TelemetryRedaction.IsAllowedExporterAttribute(key, approvedSourceAttributes))
+        {
+            redacted = null;
+            return false;
+        }
+
         if (IsSensitiveKey(key))
         {
             redacted = Redacted;

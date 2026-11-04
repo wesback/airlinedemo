@@ -48,6 +48,11 @@ resource "azurerm_public_ip" "build_runner_nat" {
   resource_group_name = azurerm_resource_group.demo.name
   allocation_method   = "Static"
   sku                 = "Standard"
+
+  lifecycle {
+    # Azure owns this allocation tag; removing it would replace the retained NAT address.
+    ignore_changes = [ip_tags["FirstPartyUsage"]]
+  }
 }
 
 resource "azurerm_nat_gateway" "build_runner" {
@@ -160,7 +165,7 @@ resource "azurerm_linux_virtual_machine" "build_runner" {
 
   os_disk {
     caching              = "ReadWrite"
-    storage_account_type = "Premium_LRS"
+    storage_account_type = var.build_runner_os_disk_storage_account_type
     disk_size_gb         = 64
   }
 

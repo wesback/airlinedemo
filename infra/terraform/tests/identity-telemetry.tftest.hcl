@@ -1,4 +1,5 @@
 mock_provider "azuread" {
+  override_during = plan
   mock_data "azuread_client_config" {
     defaults = {
       object_id = "00000000-0000-0000-0000-0000000000d0"
@@ -17,6 +18,7 @@ mock_provider "azuread" {
   }
 }
 mock_provider "azurerm" {
+  override_during = plan
   mock_resource "azurerm_mssql_server" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Sql/servers/sql-demo-test"
@@ -190,13 +192,12 @@ variables {
   }
 }
 
-# This run must stay first: override_resource values apply only when a resource is created,
-# and Terraform 1.9 test runs share state, so it needs the freshly created identities.
 run "M-14_app_grants_bind_to_app_principal_not_migration" {
-  command = apply
+  command = plan
 
   override_resource {
-    target = azurerm_user_assigned_identity.app
+    target          = azurerm_user_assigned_identity.app
+    override_during = plan
     values = {
       principal_id = "55555555-5555-5555-5555-555555555555"
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-airline-demo/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app-mock"
@@ -204,7 +205,8 @@ run "M-14_app_grants_bind_to_app_principal_not_migration" {
   }
 
   override_resource {
-    target = azurerm_user_assigned_identity.migration
+    target          = azurerm_user_assigned_identity.migration
+    override_during = plan
     values = {
       principal_id = "66666666-6666-6666-6666-666666666666"
     }
@@ -227,7 +229,7 @@ run "M-14_app_grants_bind_to_app_principal_not_migration" {
 }
 
 run "M-14_app_identity_grants_are_exact" {
-  command = apply
+  command = plan
 
   assert {
     condition     = azurerm_role_assignment.app_openai_user.role_definition_name == "Cognitive Services OpenAI User"
@@ -306,6 +308,9 @@ run "source_read_windows_app_grant_is_exact" {
       "GRANT SELECT ON OBJECT::dbo.copilot_proposal_states TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.copilot_proposal_states TO [id-airline-app];",
       "GRANT UPDATE ON OBJECT::dbo.copilot_proposal_states TO [id-airline-app];",
+      "GRANT SELECT ON OBJECT::dbo.managed_conversations TO [id-airline-app];",
+      "GRANT INSERT ON OBJECT::dbo.managed_conversations TO [id-airline-app];",
+      "GRANT UPDATE ON OBJECT::dbo.managed_conversations TO [id-airline-app];",
       "GRANT SELECT ON OBJECT::dbo.investigation_traces TO [id-airline-app];",
       "GRANT INSERT ON OBJECT::dbo.investigation_traces TO [id-airline-app];",
       "GRANT SELECT ON OBJECT::dbo.investigation_trace_steps TO [id-airline-app];",
@@ -388,7 +393,7 @@ run "audit_table_remains_append_only_after_source_read_grant" {
 }
 
 run "M-14_evidence_scope_is_exact_container" {
-  command = apply
+  command = plan
 
   assert {
     condition     = azurerm_role_assignment.app_evidence.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.Storage/storageAccounts/stdemotest/blobServices/default/containers/evidence"
@@ -397,7 +402,7 @@ run "M-14_evidence_scope_is_exact_container" {
 }
 
 run "M-14_app_role_scopes_are_exact_literals" {
-  command = apply
+  command = plan
 
   assert {
     condition     = azurerm_role_assignment.app_openai_user.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test/providers/Microsoft.CognitiveServices/accounts/aoai-demo-test"
@@ -420,13 +425,13 @@ run "M-14_app_role_scopes_are_exact_literals" {
   }
 
   assert {
-    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 41 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
+    condition     = length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "SCHEMA::dbo")]) == 0 && length([for s in output.app_sql_grant_statements : s if startswith(s, "GRANT") && strcontains(s, "OBJECT::dbo.")]) == 44 && contains(output.app_sql_grant_statements, "GRANT SELECT ON OBJECT::dbo.cases TO [id-airline-app];") && contains(output.app_sql_grant_statements, "GRANT UPDATE ON OBJECT::dbo.case_decisions TO [id-airline-app];")
     error_message = "App SQL grants on dbo must cover exactly the adapter tables, with append-only history access and no schema-wide grants."
   }
 }
 
 run "M-14_grants_bind_to_app_identity_as_service_principal" {
-  command = apply
+  command = plan
 
   assert {
     condition     = azurerm_role_assignment.app_openai_user.principal_type == "ServicePrincipal" && azurerm_role_assignment.app_evidence.principal_type == "ServicePrincipal" && azurerm_role_assignment.app_telemetry.principal_type == "ServicePrincipal"
@@ -483,7 +488,7 @@ run "M-14_app_sql_contract_excludes_ddl_and_audit_mutation" {
 }
 
 run "M-14_migration_identity_has_only_sql_management_scope" {
-  command = apply
+  command = plan
 
   assert {
     condition     = azurerm_role_assignment.migration_sql.role_definition_name == "SQL DB Contributor" && azurerm_mssql_server.sql.name == "sql-demo-test"
@@ -497,7 +502,7 @@ run "M-14_migration_identity_has_only_sql_management_scope" {
 }
 
 run "M-14_terraform_identity_scope_is_exact_resource_group" {
-  command = apply
+  command = plan
 
   assert {
     condition     = azurerm_role_assignment.terraform_contributor.scope == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-demo-test" && azurerm_role_assignment.terraform_contributor.role_definition_name == "Contributor"
@@ -525,7 +530,7 @@ run "M-07_telemetry_retention_and_no_public_access" {
 }
 
 run "M-07_telemetry_reader_is_read_only_group" {
-  command = apply
+  command = plan
 
   assert {
     condition     = azurerm_role_assignment.telemetry_reader.role_definition_name == "Log Analytics Reader" && azurerm_role_assignment.telemetry_reader.principal_type == "Group"
@@ -544,7 +549,7 @@ run "M-07_telemetry_reader_is_read_only_group" {
 }
 
 run "M-07_demo_telemetry_reader_supports_signed_in_user" {
-  command = apply
+  command = plan
 
   variables {
     telemetry_reader_principal_type = "User"
@@ -563,7 +568,7 @@ run "M-07_demo_telemetry_reader_supports_signed_in_user" {
 }
 
 run "M-15_security_alerts_cover_required_signals_and_route_to_owner" {
-  command = apply
+  command = plan
 
   assert {
     condition     = length(azurerm_monitor_scheduled_query_rules_alert_v2.security) == 3 && alltrue([for a in azurerm_monitor_scheduled_query_rules_alert_v2.security : a.severity == 1])

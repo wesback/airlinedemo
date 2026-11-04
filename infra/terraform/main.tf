@@ -30,6 +30,9 @@ provider "azurerm" {
   # Storage has shared keys disabled, so container management must use Entra auth.
   storage_use_azuread = true
   features {
+    template_deployment {
+      delete_nested_items_during_deletion = false
+    }
     resource_group {
       prevent_deletion_if_contains_resources = false
     }
@@ -340,12 +343,13 @@ resource "azurerm_network_security_rule" "egress_deny_all" {
 }
 
 resource "azurerm_mssql_server" "sql" {
-  name                          = local.sql_server_name
-  resource_group_name           = azurerm_resource_group.demo.name
-  location                      = azurerm_resource_group.demo.location
-  version                       = "12.0"
-  minimum_tls_version           = "1.2"
-  public_network_access_enabled = false
+  name                                     = local.sql_server_name
+  resource_group_name                      = azurerm_resource_group.demo.name
+  location                                 = azurerm_resource_group.demo.location
+  version                                  = "12.0"
+  minimum_tls_version                      = "1.2"
+  public_network_access_enabled            = false
+  express_vulnerability_assessment_enabled = true
 
   azuread_administrator {
     login_username              = var.sql_admin_group_name

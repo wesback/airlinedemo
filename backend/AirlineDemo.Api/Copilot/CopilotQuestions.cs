@@ -1,19 +1,21 @@
 using System.Security.Cryptography;
+using System.Data.Common;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using AirlineDemo.Api.Auth;
 using AirlineDemo.Api.Evaluation;
+using AirlineDemo.Api.Foundry;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using Microsoft.Extensions.AI;
+using AirlineDemo.Api.SourceSystems;
 
 namespace AirlineDemo.Api.Copilot;
 
 /// <summary>
-/// The copilot Q&amp;A model client (FR-012, FR-013, FR-016): one admitted question runs a bounded model/tool loop through
-/// the governed gateway client. Every tool call is dispatched through the in-process MCP tool pipeline as the current
-/// user; the model sees only fixed instructions, the question and rebuilt structural observations.
+/// The copilot Q&amp;A model client (FR-012, FR-013, FR-016): one admitted question runs through the managed agent
+/// conversation and turn lifecycle. Every tool call is dispatched through the in-process MCP tool pipeline as the
+/// current user; the model sees only fixed instructions, the question and rebuilt structural observations.
 /// </summary>
 public static class CopilotQuestions
 {
@@ -30,9 +32,9 @@ public static class CopilotQuestions
     public const int MaxCitations = 100;
     public static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan[] Backoff = [TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(1000)];
-    private static readonly Regex CallId = new("^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
     private static readonly AITool[] Declarations = [.. CopilotMcp.Tools.Select(tool =>
         (AITool)AIFunctionFactory.CreateDeclaration(tool.Name, tool.Description ?? "", tool.InputSchema))];
+    internal static IReadOnlyList<AITool> ToolDeclarations => Declarations;
 
     private sealed class TurnFailure(int status, string code) : Exception
     {
@@ -51,12 +53,36 @@ public static class CopilotQuestions
         var session = DemoAuthEndpoints.CurrentSession(http, sessions);
         if (CopilotRequestGuard.Check(http, session) is { } denied) return CopilotRequestGuard.Error(denied.Status, denied.Code);
         var body = await CopilotProposalEndpoints.ReadObject(http);
-        var valid = body is not null && body.Keys.All(key => key is "question" or "selectedCaseId" or "releaseNote") && body.ContainsKey("question")
-            && body.Values.All(value => value.ValueKind == JsonValueKind.String);
+        var valid = body is not null && body.Keys.All(key => key is "question" or "selectedCaseId" or "releaseNote" or "contractVersion" or "conversationHandle")
+            && body.TryGetValue("question", out var question) && question.ValueKind == JsonValueKind.String
+            && OptionalString(body, "selectedCaseId") && OptionalString(body, "releaseNote") && OptionalString(body, "conversationHandle")
+            && (!body.ContainsKey("contractVersion") || body["contractVersion"].ValueKind == JsonValueKind.Number
+                && body["contractVersion"].TryGetInt32(out _));
+        var unsupportedVersion = body is not null && body.TryGetValue("contractVersion", out var version)
+            && version.ValueKind == JsonValueKind.Number && version.TryGetInt32(out var requestedVersion)
+            && requestedVersion != CopilotProjections.ContractVersion;
         var selected = valid && body!.TryGetValue("selectedCaseId", out var id) ? Text(id) : null;
+        var requestedHandle = valid && body!.TryGetValue("conversationHandle", out var handle) ? Text(handle) : null;
+        if (selected is null && requestedHandle is not null && SqlManagedConversationStore.IsValidHandle(requestedHandle)
+            && session is not null && CopilotProjections.Roles.Contains(session.User.Role, StringComparer.Ordinal))
+        {
+            try
+            {
+                var existing = http.RequestServices.GetRequiredService<IManagedConversationStore>().ReadManagedConversation(requestedHandle);
+                if (existing is { Tuple.IsListing: false } && existing.Tuple.UserId == session.User.Id
+                    && session.User.CaseScopes.Contains(existing.Tuple.CaseId, StringComparer.Ordinal))
+                    selected = existing.Tuple.CaseId;
+            }
+            catch (ManagedConversationStoreException) { }
+            catch (DbException) { }
+        }
         return await CopilotInvocation.RunAsync(ledger, cases, session, "question", CopilotProvenance.CopilotClient, selected,
-            async (_, token) => valid ? await Execute(http, session!, body!, selected, token) : Fail(400, "invalid_request"), http.RequestAborted);
+            async (_, token) => unsupportedVersion ? Fail(400, "unsupported_contract_version")
+                : valid ? await Execute(http, session!, body!, selected, token) : Fail(400, "invalid_request"), http.RequestAborted);
     }
+
+    private static bool OptionalString(Dictionary<string, JsonElement> body, string key) =>
+        !body.TryGetValue(key, out var value) || value.ValueKind == JsonValueKind.String;
 
     private static string? Text(JsonElement value)
     {
@@ -73,153 +99,212 @@ public static class CopilotQuestions
         if (body.TryGetValue("releaseNote", out var note) && Text(note) is null) return Fail(400, "invalid_request");
         if (!CopilotProjections.Roles.Contains(session.User.Role, StringComparer.Ordinal)) return Fail(403, "forbidden");
         var services = http.RequestServices;
-        if (selected is not null && services.GetRequiredService<CopilotProjections>().Authorize(session, selected).Denied is { } denied)
+        var projections = services.GetRequiredService<CopilotProjections>();
+        if (selected is not null && projections.Authorize(session, selected).Denied is { } denied)
             return denied.Outcome == CopilotProjectionOutcome.Forbidden ? Fail(403, "forbidden") : Fail(404, "case_not_found");
+        var requestedHandle = body.TryGetValue("conversationHandle", out var handleValue) ? Text(handleValue) : null;
+        if (body.ContainsKey("conversationHandle") && (requestedHandle is null || !SqlManagedConversationStore.IsValidHandle(requestedHandle)))
+            return Fail(400, "invalid_conversation_handle");
+        var store = services.GetRequiredService<IManagedConversationStore>();
+        ManagedConversationSnapshot? binding = null;
+        if (requestedHandle is not null)
+        {
+            try { binding = store.ReadManagedConversation(requestedHandle); }
+            catch (ManagedConversationStoreException failure) { return ManagedFailure(failure.Code); }
+            catch (DbException) { return ManagedFailure("conversation_store_unavailable"); }
+            if (binding is null || binding.Tuple.UserId != session.User.Id || binding.Tuple.IsListing)
+                return ManagedFailure("conversation_not_found");
+            if (services.GetRequiredService<TimeProvider>().GetUtcNow().UtcTicks >= binding.ExpiresAtTicks)
+                return ManagedFailure("conversation_expired");
+            if (binding.Retired || binding.RemoteConversationId is null) return ManagedFailure("conversation_unavailable");
+            selected ??= binding.Tuple.CaseId;
+            if (selected != binding.Tuple.CaseId) return ManagedFailure("conversation_context_mismatch");
+            if (projections.Authorize(session, selected).Denied is { } resumedDenied)
+                return resumedDenied.Outcome == CopilotProjectionOutcome.Forbidden ? Fail(403, "forbidden") : Fail(404, "case_not_found");
+        }
         if (!(services.GetRequiredService<IConfiguration>().GetValue<bool?>(ApprovalSetting) ?? true)) return Fail(503, "copilot_input_not_approved");
         if (services.GetService<ApprovedModelManifest>() is not { } manifest || manifest.Validate().Count > 0) return Fail(503, "model_manifest_refused");
-        IChatClient client;
-        try { client = services.GetRequiredService<IChatClient>(); }
-        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or UriFormatException)
+        IManagedProjectClient managed;
+        ManagedAgentTarget target;
+        try
         {
-            return Fail(503, "model_unavailable");
+            managed = services.GetRequiredService<IManagedProjectClient>();
+            target = managed.Agent("copilot");
+        }
+        catch (ManagedProjectException failure) { return ManagedFailure(failure.Code); }
+        catch (InvalidOperationException) { return ManagedFailure("managed_agent_unconfigured"); }
+
+        var sessions = services.GetRequiredService<DemoSessionStore>();
+        var cases = services.GetRequiredService<ICaseStateStore>();
+        ManagedConversationTuple? CurrentTuple() => BuildCurrentTuple(http, sessions, cases, projections, selected, target);
+        ManagedConversationTuple? tuple;
+        try { tuple = CurrentTuple(); }
+        catch (ManagedProjectException failure) { return ManagedFailure(failure.Code); }
+        if (tuple is null) return ManagedFailure("unauthenticated");
+        if (binding is not null && tuple != binding.Tuple)
+        {
+            try { store.RetireManagedConversation(binding.Handle, binding.Tuple, binding.RowRevision, binding.ActiveFence); }
+            catch (ManagedConversationStoreException) { }
+            return ManagedFailure("conversation_context_mismatch");
         }
 
         http.Items[CopilotMcp.ProvenanceKey] = CopilotProvenance.CopilotClient;
         if (note.ValueKind == JsonValueKind.String) http.Items[CopilotMcp.ReleaseNoteKey] = note.GetString();
-        var time = services.GetRequiredService<TimeProvider>();
-        using var deadline = new CancellationTokenSource(Deadline, time);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
-        var turn = new Turn(http, client, manifest, time, question, selected, linked.Token);
-        try { return await turn.RunAsync(); }
-        catch (TurnFailure failure) { return Fail(failure.Status, failure.Code); }
-        catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        var correlation = new GatewayCorrelation("copilot", "turn-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8)),
+            "managed-copilot", selected ?? "copilot-none", target.ConfigurationId, "copilot-v1", "create-conversation");
+        try
         {
-            return Fail(504, "copilot_timeout");
+            var lifecycle = services.GetRequiredService<ManagedConversationLifecycle>();
+            binding ??= await lifecycle.CreateAsync("copilot", tuple, correlation, CurrentTuple, cancellationToken);
+            var tools = new ToolTurn(http, selected, cancellationToken, binding.Handle);
+            var configuration = new ManagedTurnConfiguration(CopilotInputContract.SystemInstructions, target.ConfigurationId, ToolSchemaContract());
+            var result = await services.GetRequiredService<ManagedTurnCoordinator>().RunAsync(
+                "copilot", binding, CurrentTuple, correlation, configuration, ManagedHistoryContract.CopilotContinuationPolicy(selected),
+                ManagedHistoryContract.CopilotQuestion(question), tools.DispatchManagedAsync, cancellationToken);
+            if (result.NativeResult is { NativeReceiptCommitted: true } native)
+            {
+                http.Response.Headers["X-Copilot-Conversation-Handle"] = binding.Handle;
+                http.Response.Headers["X-Copilot-Conversation-State"] = "retired";
+                return native;
+            }
+            return result.NativeResult ?? tools.Answer(result.Text);
         }
+        catch (ManagedProjectException failure) { return ManagedFailure(failure.Code); }
+        catch (ManagedConversationStoreException failure) { return ManagedFailure(failure.Message); }
+        catch (TurnFailure failure) { Console.Error.WriteLine($"copilot-turn:{failure.Code}"); return Fail(failure.Status, failure.Code); }
     }
 
     private static CopilotInvocationResult Fail(int status, string code) => new(CopilotRequestGuard.Error(status, code), status, code,
         status is 401 or 403 || code == "case_not_found" ? CopilotOutcome.Denied : CopilotOutcome.Failed);
 
-    private sealed class Turn(HttpContext http, IChatClient client, ApprovedModelManifest manifest, TimeProvider time, string question,
-        string? selected, CancellationToken token)
+    private static CopilotInvocationResult ManagedFailure(string code) => code switch
     {
-        private readonly DateTimeOffset _start = time.GetUtcNow();
-        private readonly string _run = "turn-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
-        private readonly List<ChatMessage> _history = [];
-        private readonly HashSet<string> _callIds = new(StringComparer.Ordinal);
+        "unauthenticated" => Fail(401, code),
+        "forbidden" => Fail(403, code),
+        "case_not_found" or "conversation_not_found" => Fail(404, code),
+        "invalid_question" => Fail(400, code),
+        "conversation_busy" or "conversation_context_mismatch" => Fail(409, code),
+        "conversation_expired" or "conversation_turn_limit" or "conversation_unavailable" => Fail(410, code),
+        "copilot_tool_limit" or "copilot_model_limit" or "copilot_retry_limit" => Fail(429, code),
+        "copilot_input_token_limit" or "copilot_output_token_limit" or "managed_content_filtered" or "managed_refusal" => Fail(422, code),
+        "copilot_timeout" => Fail(504, code),
+        "managed_agent_unconfigured" or "model_unavailable" or "conversation_not_ready" => Fail(503, "managed_agent_unconfigured"),
+        "conversation_store_unavailable" => Fail(503, code),
+        "managed_operation_ambiguous" or "conversation_history_invalid" or "managed_response_invalid" or "copilot_context_invalid" =>
+            Fail(502, code is "managed_response_invalid" or "conversation_history_invalid" ? "model_response_invalid" : code),
+        _ => Fail(502, "model_response_invalid"),
+    };
+
+    internal static ManagedConversationTuple? BuildCurrentTuple(HttpContext http, DemoSessionStore sessions, ICaseStateStore cases,
+        CopilotProjections projections, string? selected, ManagedAgentTarget target)
+    {
+        var session = DemoAuthEndpoints.CurrentSession(http, sessions);
+        if (session is null) throw new ManagedProjectException("unauthenticated");
+        if (!CopilotProjections.Roles.Contains(session.User.Role, StringComparer.Ordinal))
+            throw new ManagedProjectException("forbidden");
+        var fingerprint = EntitlementFingerprint(session.User);
+        if (selected is null)
+            return new ManagedConversationTuple(session.User.Id, session.User.Role, "copilot-none", fingerprint, 0,
+                target.Name, target.Version, target.ConfigurationId, IsListing: true);
+
+        var access = projections.Authorize(session, selected);
+        if (access.Denied is { } denied)
+            throw new ManagedProjectException(denied.Outcome switch
+            {
+                CopilotProjectionOutcome.Unauthenticated => "unauthenticated",
+                CopilotProjectionOutcome.Forbidden => "forbidden",
+                _ => "case_not_found",
+            });
+        var scope = access.Scope ?? throw new ManagedProjectException("case_not_found");
+        return new ManagedConversationTuple(session.User.Id, session.User.Role, selected, fingerprint,
+            cases.Read(scope).Revision, target.Name, target.Version, target.ConfigurationId);
+    }
+
+    internal static string EntitlementFingerprint(DemoUser user)
+    {
+        var permissions = new
+        {
+            Role = user.Role,
+            Cases = user.CaseScopes.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
+            Sources = SourceModes.Sources.Where(source => SourceReadEndpoints.Allowed(user.Role, source))
+                .Order(StringComparer.Ordinal).ToArray(),
+        };
+        return Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(permissions))));
+    }
+
+    private static string ToolSchemaContract() => JsonSerializer.Serialize(Declarations.OfType<AIFunctionDeclaration>()
+        .Select(tool => new { tool.Name, tool.Description, Schema = tool.JsonSchema.GetRawText() }));
+
+    internal static bool IsValidAnswer(string text, IReadOnlySet<CopilotSourceRef> returned) => ToolTurn.IsValidAnswer(text, returned);
+    internal static bool IsValidAnswerEnvelope(string text) => ToolTurn.IsValidAnswerEnvelope(text);
+
+    internal sealed class ToolTurn(HttpContext http, string? selected, CancellationToken token, string? conversationHandle = null)
+    {
         private static readonly JsonSerializerOptions EscapedJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default };
         private readonly JsonArray _records = [];
         private readonly HashSet<string> _recordIdentities = new(StringComparer.Ordinal);
-        // The source/record/version tuples read_source returned to this user in this turn: the only citable values.
+        // Only source/record/version tuples read_source returned in this turn are citable.
         private readonly HashSet<CopilotSourceRef> _returned = [];
-        private int _modelAttempts;
-        private int _toolAttempts;
 
-        public async Task<CopilotInvocationResult> RunAsync()
+        internal async Task<JsonObject> DispatchManagedAsync(ManagedToolSelection selection, CancellationToken cancellationToken)
         {
-            while (true)
+            cancellationToken.ThrowIfCancellationRequested();
+            http.Items[CopilotMcp.ProvenanceKey] = CopilotProvenance.CopilotClient;
+            var rawArguments = selection.RawArguments ?? selection.Arguments.ToJsonString();
+            Dictionary<string, object?>? arguments;
+            try { arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(rawArguments); }
+            catch (JsonException) { arguments = null; }
+            var call = new FunctionCallContent(selection.CallId, selection.Name, arguments)
             {
-                var response = await CallModelAsync();
-                var calls = response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>().ToArray();
-                if (calls.Length == 0) return Answer(response.Text);
-                if (calls.Any(call => call.CallId is null || !CallId.IsMatch(call.CallId) || !_callIds.Add(call.CallId)))
-                    throw new TurnFailure(502, "model_response_invalid");
-                var requested = new List<AIContent>();
-                var observed = new List<AIContent>();
-                foreach (var call in calls)
-                {
-                    if (++_toolAttempts > MaxToolAttempts) throw new TurnFailure(429, "copilot_tool_limit");
-                    var (name, arguments, observation, confirmation) = await DispatchAsync(call);
-                    if (confirmation is not null) return Result(ConfirmationAnswer, "confirmation_required", confirmation);
-                    requested.Add(new FunctionCallContent(call.CallId, name, arguments));
-                    observed.Add(new FunctionResultContent(call.CallId, observation.ToJsonString()));
-                }
-                // Only validated tool-call metadata is retained; the model's intermediate text is never fed back.
-                _history.Add(new ChatMessage(ChatRole.Assistant, requested));
-                _history.Add(new ChatMessage(ChatRole.Tool, observed));
-            }
-        }
-
-        private async Task<ChatResponse> CallModelAsync()
-        {
-            ChatMessage[] messages = [new(ChatRole.System, CopilotInputContract.SystemInstructions), new(ChatRole.User, question), .. _history];
-            if (CopilotInputContract.EstimateInputTokens(messages, Declarations) > MaxInputTokens) throw new TurnFailure(422, "copilot_input_token_limit");
-            var options = new ChatOptions { Tools = [.. Declarations], MaxOutputTokens = MaxOutputTokens, AllowMultipleToolCalls = true };
-            for (var retries = 0; ; retries++)
+                RawRepresentation = OpenAI.Chat.ChatToolCall.CreateFunctionToolCall(
+                    selection.CallId, selection.Name, BinaryData.FromString(rawArguments)),
+            };
+            try
             {
-                if (++_modelAttempts > MaxModelAttempts) throw new TurnFailure(429, "copilot_model_limit");
-                CheckDeadline();
-                var correlation = new GatewayCorrelation("copilot", _run, "copilot-questions", selected ?? "copilot-none",
-                    $"{manifest.DeploymentName}-{manifest.Model}-{manifest.ApiVersion}-{manifest.Region}", "copilot-v1", $"call-{_modelAttempts}");
-                ChatResponse response;
-                try
-                {
-                    ModelGatewayTokenomics.ValidateCorrelation(correlation);
-                    using var scope = GatewayCorrelationContext.Begin(correlation);
-                    response = await client.GetResponseAsync(messages, options, token);
-                }
-                catch (Exception exception) when (IsTransient(exception))
-                {
-                    if (retries == MaxRetries) throw new TurnFailure(429, "copilot_retry_limit");
-                    await Task.Delay(Backoff[retries], time, token);
-                    continue;
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException and not TurnFailure)
-                {
-                    throw new TurnFailure(503, "model_unavailable");
-                }
-                CheckDeadline();
-                if (response.Usage?.InputTokenCount > MaxInputTokens) throw new TurnFailure(422, "copilot_input_token_limit");
-                if (response.Usage?.OutputTokenCount > MaxOutputTokens || response.FinishReason == ChatFinishReason.Length)
-                    throw new TurnFailure(422, "copilot_output_token_limit");
-                return response;
+                var (_, _, observation, terminal) = await DispatchAsync(call, cancellationToken);
+                if (terminal is not null) throw new ManagedToolTerminal(terminal, terminal.NativeReceiptCommitted);
+                return observation;
             }
+            catch (TurnFailure failure) { throw new ManagedProjectException(failure.Code); }
         }
-
-        private void CheckDeadline()
-        {
-            token.ThrowIfCancellationRequested();
-            if (time.GetUtcNow() - _start >= Deadline) throw new TurnFailure(504, "copilot_timeout");
-        }
-
-        // The same transient classification as the investigator's gated client.
-        private static bool IsTransient(Exception exception) =>
-            exception is HttpRequestException or TimeoutException
-            || exception is System.ClientModel.ClientResultException { Status: 408 or 429 }
-            || exception is System.ClientModel.ClientResultException { Status: >= 500 and <= 599 };
 
         // A call refused before dispatch is still one ledger invocation, recorded against the trusted selected case only;
         // the model's other case ID is never passed to the ledger.
-        private async Task<JsonObject> RefuseAsync(string operation, int status, string code)
+        private async Task<JsonObject> RefuseAsync(string operation, int status, string code, CancellationToken cancellationToken)
         {
             var services = http.RequestServices;
             var session = DemoAuthEndpoints.CurrentSession(http, services.GetRequiredService<DemoSessionStore>());
             var result = await CopilotInvocation.RunAsync(services.GetRequiredService<ICopilotInvocationLedger>(),
                 services.GetRequiredService<ICaseStateStore>(), session, operation, CopilotProvenance.CopilotClient, selected,
-                _ => Task.FromResult(Fail(status, code)), token);
+                _ => Task.FromResult(Fail(status, code)), cancellationToken);
             if (result is IStatusCodeHttpResult { StatusCode: StatusCodes.Status503ServiceUnavailable }) throw new TurnFailure(503, "audit_unavailable");
             return Error(status, code);
         }
 
-        private async Task<(string Name, Dictionary<string, object?> Arguments, JsonObject Observation, JsonNode? Confirmation)> DispatchAsync(
-            FunctionCallContent call)
+        internal async Task<(string Name, Dictionary<string, object?> Arguments, JsonObject Observation, CopilotInvocationResult? Terminal)> DispatchAsync(
+            FunctionCallContent call, CancellationToken? executionToken = null)
         {
+            var callToken = executionToken ?? token;
+            callToken.ThrowIfCancellationRequested();
             var (arguments, reject) = RawArguments(call);
             var (known, args) = CopilotMcp.Parse(call.Name, arguments, reject);
-            if (!known) return ("unknown_tool", [], await RefuseAsync("unknown_tool", 400, "unknown_tool"), null);
+            if (!known) return ("unknown_tool", [], await RefuseAsync("unknown_tool", 400, "unknown_tool", callToken), null);
             var retained = args is null ? new Dictionary<string, object?>() : Retained(args);
             if (args is not null && call.Name != "list_my_cases")
             {
-                if (selected is null) return (call.Name, retained, await RefuseAsync(call.Name, 409, "case_selection_required"), null);
-                if (args.CaseId != selected) return (call.Name, retained, await RefuseAsync(call.Name, 403, "selected_case_mismatch"), null);
+                if (selected is null) return (call.Name, retained, await RefuseAsync(call.Name, 409, "case_selection_required", callToken), null);
+                if (args.CaseId != selected) return (call.Name, retained, await RefuseAsync(call.Name, 403, "selected_case_mismatch", callToken), null);
             }
-            var tool = await CopilotMcp.InvokeToolAsync(http, call.Name, arguments, reject, token);
+            var tool = await CopilotMcp.InvokeToolAsync(http, call.Name, arguments, reject, callToken);
             // A read the server withheld for an invalid record identity or a lost audit stops the turn, as the observation contract would.
             if (tool.Structured["error"]?["code"] is JsonValue failed && (string?)failed is "copilot_context_invalid" or "audit_unavailable")
                 throw new TurnFailure((int)tool.Structured["httpStatus"]!, (string)failed!);
             if (tool.Structured["resultCode"] is JsonValue code && (string?)code == "confirmation_required")
-                return (call.Name, retained, tool.Structured, tool.Structured["uiOnly"]!.DeepClone());
+                return (call.Name, retained, tool.Structured, Result(ConfirmationAnswer, "confirmation_required", tool.Structured["uiOnly"]!.DeepClone()));
+            if (tool.Raw is not null)
+                return (call.Name, retained, tool.Structured, new CopilotInvocationResult(
+                    Results.Text(tool.Raw, "application/json; charset=utf-8"), tool.HttpStatus, "ok", CopilotOutcome.Succeeded)
+                    { NativeReceiptCommitted = true });
             var observation = CopilotInputContract.Observe(call.Name, args?.Operation, tool.Structured)
                 ?? throw new TurnFailure(502, "copilot_context_invalid");
             _returned.UnionWith(CopilotInputContract.ReturnedRefs(observation));
@@ -274,7 +359,31 @@ public static class CopilotQuestions
         };
 
         // The final answer is {"answer": "<plain text>", "citations"?: [tuple]}; any other shape is an invalid model response.
-        private CopilotInvocationResult Answer(string text)
+        internal CopilotInvocationResult Answer(string text)
+        {
+            var (answer, citations) = ParseAnswer(text, _returned);
+            return Result(answer, "ok", null, citations);
+        }
+
+        internal static bool IsValidAnswer(string text, IReadOnlySet<CopilotSourceRef> returned)
+        {
+            try { _ = ParseAnswer(text, returned); return true; }
+            catch (TurnFailure) { return false; }
+        }
+
+        internal static bool IsValidAnswerEnvelope(string text)
+        {
+            try
+            {
+                var root = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions { AllowDuplicateProperties = false }) as JsonObject;
+                return root is not null && root.All(property => property.Key is "answer" or "citations")
+                    && root["answer"] is JsonValue answer && answer.GetValueKind() == JsonValueKind.String
+                    && answer.GetValue<string>() is { Length: > 0 and <= MaxAnswerLength } value && !string.IsNullOrWhiteSpace(value);
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException) { return false; }
+        }
+
+        private static (string Answer, List<CopilotSourceRef> Citations) ParseAnswer(string text, IReadOnlySet<CopilotSourceRef> returned)
         {
             JsonObject? root;
             try { root = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions { AllowDuplicateProperties = false }) as JsonObject; }
@@ -283,12 +392,12 @@ public static class CopilotQuestions
                 || root["answer"] is not JsonValue answer || answer.GetValueKind() != JsonValueKind.String
                 || answer.GetValue<string>() is not { Length: > 0 and <= MaxAnswerLength } value || string.IsNullOrWhiteSpace(value))
                 throw new TurnFailure(502, "model_response_invalid");
-            return Result(value, "ok", null, root.ContainsKey("citations") ? Citations(root["citations"]) : []);
+            return (value, root.ContainsKey("citations") ? Citations(root["citations"], returned) : []);
         }
 
         // A citation is exactly one tuple read_source returned in this turn; a URL, point reference, other record,
         // version or case is refused and no link is produced.
-        private List<CopilotSourceRef> Citations(JsonNode? node)
+        private static List<CopilotSourceRef> Citations(JsonNode? node, IReadOnlySet<CopilotSourceRef> returned)
         {
             var cited = new List<CopilotSourceRef>();
             if (node is not JsonArray array || array.Count > MaxCitations) throw new TurnFailure(502, "citation_invalid");
@@ -300,7 +409,7 @@ public static class CopilotQuestions
                     || version.GetValueKind() != JsonValueKind.Number || !version.TryGetValue<int>(out var number))
                     throw new TurnFailure(502, "citation_invalid");
                 var reference = new CopilotSourceRef(source.GetValue<string>(), record.GetValue<string>(), number);
-                if (!_returned.Contains(reference)) throw new TurnFailure(502, "citation_invalid");
+                if (!returned.Contains(reference)) throw new TurnFailure(502, "citation_invalid");
                 if (!cited.Contains(reference)) cited.Add(reference);
             }
             return cited;
@@ -317,6 +426,11 @@ public static class CopilotQuestions
                 })]),
                 ["records"] = _records,
             };
+            if (conversationHandle is not null)
+            {
+                body["conversationHandle"] = conversationHandle;
+                body["conversationState"] = selected is null ? "retired" : "active";
+            }
             if (confirmation is not null) body["confirmation"] = confirmation;
             // The minimal-API default encoder is relaxed; untrusted record text is written with HTML-sensitive characters escaped.
             return new(Results.Text(body.ToJsonString(EscapedJson), "application/json; charset=utf-8"), 200, code, CopilotOutcome.Succeeded);

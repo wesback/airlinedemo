@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using OpenTelemetry.Logs;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
@@ -50,17 +51,28 @@ public static class DiagnosticsSetup
             });
         }));
 
-        services.AddOpenTelemetry().WithTracing(tracing =>
-        {
-            tracing.SetResourceBuilder(resource);
-            tracing.AddSource(TelemetryRedaction.ServiceName);
-            // Processors run in registration order, so redaction must be added before the exporter.
-            tracing.AddRedaction();
-            tracing.AddAzureMonitorTraceExporter(o =>
+        services.AddOpenTelemetry()
+            .ConfigureResource(configure => configure
+                .AddTelemetrySdk()
+                .AddAttributes(resourceAttributes))
+            .WithTracing(tracing =>
             {
-                o.ConnectionString = connectionString;
+                tracing.AddSource(TelemetryRedaction.ServiceName, "System.Net.Http");
+                // Processors run in registration order, so redaction must be added before the exporter.
+                tracing.AddRedaction(approvedSourceAttributes);
+                tracing.AddAzureMonitorTraceExporter(o =>
+                {
+                    o.ConnectionString = connectionString;
+                });
+            })
+            .WithMetrics(metrics =>
+            {
+                metrics.AddMeter(TelemetryRedaction.SourceSystemMeterName, TelemetryRedaction.ManagedAgentMeterName);
+                metrics.AddAzureMonitorMetricExporter(o =>
+                {
+                    o.ConnectionString = connectionString;
+                });
             });
-        });
 
         return services;
     }
@@ -82,7 +94,12 @@ public static class DiagnosticsSetup
 
     // Redacts span tags and span event attributes before export.
     public static TracerProviderBuilder AddRedaction(this TracerProviderBuilder builder) =>
-        builder.AddProcessor(new RedactingActivityProcessor());
+        builder.AddRedaction(null);
+
+    public static TracerProviderBuilder AddRedaction(
+        this TracerProviderBuilder builder,
+        IReadOnlySet<string>? approvedSourceAttributes) =>
+        builder.AddProcessor(new RedactingActivityProcessor(approvedSourceAttributes));
 
     private sealed class RedactingLogProcessor : BaseProcessor<LogRecord>
     {
@@ -162,13 +179,29 @@ public static class DiagnosticsSetup
         }
     }
 
-    private sealed class RedactingActivityProcessor : BaseProcessor<Activity>
+    private sealed class RedactingActivityProcessor(IReadOnlySet<string>? approvedSourceAttributes) : BaseProcessor<Activity>
     {
+        private static readonly HashSet<string> AllowedSpanNames = new(StringComparer.Ordinal)
+        {
+            "invoke_agent", "execute_tool", "create.conversation", "get.conversation", "list.conversation.items",
+            "delete.conversation", "create.response", "get.response", "delete.response", "review",
+            "GET", "POST", "DELETE", "HTTP GET", "HTTP POST", "HTTP DELETE",
+        };
+
         public override void OnEnd(Activity data)
         {
+            if (!AllowedSpanNames.Contains(data.DisplayName))
+            {
+                data.DisplayName = "diagnostic operation";
+            }
+            if (data.Status != ActivityStatusCode.Unset)
+            {
+                data.SetStatus(data.Status);
+            }
+
             foreach (var tag in data.TagObjects.ToList())
             {
-                if (RedactionFilter.IsSensitiveKey(tag.Key) || !RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
+                if (!RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted, approvedSourceAttributes))
                 {
                     RemoveActivityTag(data, tag.Key);
                 }
@@ -180,8 +213,16 @@ public static class DiagnosticsSetup
 
             // Events recorded with Activity.AddEvent keep a reference to their tag collection, which stays mutable
             // after recording, so event attributes are rewritten here, in the same pass as span tags.
-            foreach (var activityEvent in data.Events)
+            var events = data.Events.ToList();
+            var approvedEvents = new List<ActivityEvent>();
+            foreach (var activityEvent in events)
             {
+                if (activityEvent.Name != "exception")
+                {
+                    continue;
+                }
+                approvedEvents.Add(activityEvent);
+
                 if (activityEvent.Tags is not { } eventTags)
                 {
                     continue;
@@ -189,7 +230,7 @@ public static class DiagnosticsSetup
 
                 foreach (var tag in eventTags.ToList())
                 {
-                    if (RedactionFilter.IsSensitiveKey(tag.Key) || !RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted))
+                    if (!RedactionFilter.TryRedact(tag.Key, tag.Value, out var redacted, approvedSourceAttributes))
                     {
                         RemoveEventTag(eventTags, tag);
                     }
@@ -198,6 +239,32 @@ public static class DiagnosticsSetup
                         SetEventTag(eventTags, tag.Key, redacted);
                     }
                 }
+            }
+
+            if (events.Count > 0)
+            {
+                ReplaceActivityEvents(data, approvedEvents);
+            }
+        }
+
+        private static void ReplaceActivityEvents(Activity activity, IReadOnlyList<ActivityEvent> events)
+        {
+            const System.Reflection.BindingFlags Any =
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+            var store = typeof(Activity).GetField("_events", Any)?.GetValue(activity)
+                ?? throw new InvalidOperationException("Activity event storage is unavailable; unapproved event names cannot be removed.");
+            var methods = store.GetType().GetMethods(Any);
+            var clear = methods.FirstOrDefault(method => method.Name == "Clear" && method.GetParameters().Length == 0)
+                ?? throw new InvalidOperationException("Activity event storage has no Clear method; unapproved event names cannot be removed.");
+            var add = methods.FirstOrDefault(method => method.Name == "Add"
+                && method.GetParameters() is [{ ParameterType: var parameterType }]
+                && parameterType == typeof(ActivityEvent))
+                ?? throw new InvalidOperationException("Activity event storage has no Add method; approved events cannot be restored.");
+
+            clear.Invoke(store, null);
+            foreach (var activityEvent in events)
+            {
+                add.Invoke(store, [activityEvent]);
             }
         }
 

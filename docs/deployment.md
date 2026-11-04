@@ -21,6 +21,10 @@ Before starting:
 - Clone `wesback/airlinedemo`, check out the reviewed revision, and authenticate
   `gh`. The existing GitHub OIDC identities are specific to this repository;
   deploying a fork requires a separately reviewed federation change.
+  Commit and publish deployable changes before remote execution. The script
+  refuses tracked source edits, verifies the published commit and checks the
+  executor's exact committed source archive digest. Untracked local source is
+  not deployed; operator settings travel separately through protected transport.
 - Obtain subscription provisioning and role-assignment rights, permission to
   register Entra applications, and permission to read the signed-in user.
   Activate any time-limited privileges for the complete deployment window.
@@ -131,6 +135,269 @@ is pending. That is a deliberate pause, not permission to skip the gate.
 An existing app blocks a platform-only configuration with no image: the normal
 deployment command never silently destroys a working app.
 
+## Foundry migration preflight
+
+The Foundry migration is not yet a complete deployment route. The new
+`foundry-plan`, `foundry-preflight` and `foundry-apply` stages enforce its evidence
+gates; the existing `all`/`platform` route has not yet been migrated. These stages
+require an existing authenticated private executor, backend/settings, and the
+reviewed Foundry Terraform topology. They refuse a plan without the exact
+`azurerm_resource_group_template_deployment.foundry[0]` account/project wrapper.
+Passing unit tests does not establish private service compatibility or policy
+compliance.
+The account/project wrapper pins `2026-09-15-preview` and declares all three
+exact ARM-ID store bindings directly on the project, without optional account
+defaults or partial inheritance. Both preview versions rejected the documented
+Search ID on the account despite native validation. The project-only route is
+a compatibility candidate, not proof of a working deployment; exact generated
+store/private runtime readback must pass before agents are published. Never
+replace store IDs with unverified names or reuse a partially applied saved plan.
+Actual project-only creation succeeded but returned no capability settings,
+connections or generated stores. The documented backward-compatible private
+capability-host provisioning route subsequently created the three AAD
+connections and project host using the same full resource IDs and existing
+network injection. Its temporary project Blob-account provisioning grant was
+removed after provisioning, before agent execution. New agent-runtime
+compatibility is still unverified; this management route does not change the
+pinned New agent/Responses APIs.
+
+The service-generated agent Blob container can include a 12-hex suffix between
+the project workspace GUID and `azureml-agent`. Setup must discover its exact
+existing private name and record `foundry_agent_container_name` in the protected
+settings; this is not another Azure ID requested from the operator. Terraform
+rejects another workspace or an unverified suffix, reads the exact existing
+container, and retains container-only data grants. It never creates a substitute
+container or grants account-wide runtime Blob data access.
+
+An existing native Cosmos operator role can read back its scope with
+`/resourcegroups/` rather than `/resourceGroups/`. The Cosmos management grant
+normalizes only this path segment to retain the same exact account, role and
+principal without a casing-only replacement. Database-level data grants and
+private container scopes are unchanged; the saved-plan no-deletion guard remains enabled.
+
+When fresh rebuild settings exist, Foundry planning uses that variable/backend
+pair rather than the previous deployment's saved settings. Missing members of
+the fresh pair stop planning instead of mixing old and new inputs.
+
+The optional `foundry_state_profile.search_location` selects `swedencentral`
+or `germanywestcentral` or `francecentral`; omitting it preserves the application's region.
+This changes only Search: the Foundry account and its VNet remain together,
+and the Search private endpoint stays in that VNet's region. Planning checks
+the selected Search region's provider support and quota. Quota does not
+guarantee physical allocation; current policy and private connectivity checks
+still apply.
+
+On partial-apply recovery, planning adopts an existing agent-subnet NSG
+association into Terraform state when both exact resource IDs belong to the
+deployment's resource group. This handles an NSG attached by tenant automation
+before the first association completed. Import does not change the live NSG;
+any subsequent association change remains visible in the complete saved plan.
+Foreign subnet readback or NSG scope stops reconciliation.
+State adoption uses a temporary association-only Terraform configuration with
+the same remote backend, Entra authentication, provider lock and state lock.
+This avoids evaluating service-owned stores before Foundry creates them.
+It runs only init/import, never apply; the subsequent complete plan still
+checks the full topology and generated-store grant scopes.
+
+The provisioning identity can be an Entra user or service principal; Azure
+resolves its principal type for the two scoped store-provisioning grants.
+Available Search quota does not guarantee regional provisioning capacity. If
+Search returns `InsufficientResourcesAvailable`, retain the partial Terraform
+state and replan after checking availability for the selected same-region tier.
+Refresh the exact tier's quota and price evidence; do not silently change region,
+open public access or delete the stores that were already created.
+Retail Prices reads use at most four attempts for transient connection failures
+and HTTP 429/500/502/503/504 responses. Denials, certificate failures
+and malformed JSON are not retried or replaced with cached evidence.
+
+For a retained build runner, set the optional
+`build_runner_os_disk_storage_account_type` to its actual OS disk SKU in the
+selected settings before planning; the default remains `Premium_LRS`. Supported
+values are `Standard_LRS`, `StandardSSD_LRS` and `Premium_LRS`. A mismatched SKU
+would replace the VM and is rejected by the Foundry no-deletion guard. Azure
+retains ownership of the NAT IP's `FirstPartyUsage` allocation tag; other IP
+settings remain Terraform-managed. SQL express vulnerability assessment and
+signing-certificate auto-renewal at 80 percent of lifetime are explicitly retained.
+
+The candidate adds a separate APIM API at
+`/foundry/projects/airline-demo/openai/v1`. It admits only conversation
+create/read/delete, item list/delete and response create/read/delete. Other
+operations are explicit deny routes, not a pass-through. The existing model
+comparison and Prompt Shields APIs remain separate. Only APIM receives the
+project-scoped **Foundry Agent Consumer** role; the application receives no
+direct project grant.
+
+`foundry_runtime_profile` is initially null, so the new API rejects every runtime
+request until both immutable agent versions have been published and their exact
+configuration digests supplied. Setup must populate the two `copilot` and
+`investigator` entries with `name`, numeric `version` and lowercase SHA-256
+`configuration_id`; it never selects `latest`. Wrong operations, projects and
+agent/configuration tuples return `gateway_operation_forbidden`,
+`gateway_target_forbidden` and `gateway_agent_forbidden`, respectively. Native
+APIM policy compilation and private service authorization still require the
+deployment acceptance checks; local rendered-policy tests are not live proof.
+
+The candidate backend registers a lazy gateway-only transport and a SQL-backed
+conversation metadata store. The additive `managed_conversations` migration
+stores owner/context, remote identifiers, revisions and fences, not a transcript.
+Runtime SQL grants add only `SELECT`, `INSERT` and `UPDATE` on that table; cleanup
+uses a separate bounded `managed-cleanup` command and a separate identity; its
+SQL permissions and scheduler are not installed yet. The command accepts a
+protected configuration file containing `projectEndpoint`, `cleanupClientId`,
+`server` and `database`, and requires least-privilege SQL and direct Foundry
+project permissions. Do not run it until those grants and private endpoint
+behavior are accepted. It claims at most 100 bindings, runs for at most ten
+minutes, performs at most 1000 deletes, and claims a binding no more than three
+times per rolling 24 hours. Item and response deletes are confirmed by a fresh
+complete listing before checkpointing; conversation deletion is confirmed by a
+not-found read. It assumes no deletion cascade, retains confirmed cleanup
+metadata for seven days, and does not claim physical erasure. Scheduling is
+P04-T05 and remains uninstalled. Missing SQL configuration fails closed before
+remote creation rather than falling back to process memory.
+Creation/recovery and fenced completion have production-host tests with a real
+SQLite adapter, including lost replies, failed SQL completion and late results.
+These are not Azure SQL concurrency or private-service acceptance evidence.
+The registered continuation host enforces the observable 16000-input estimate,
+2000-output setting, eight submissions, 20 function selections and read-only
+500/1000ms retry schedule. Writes are never automatically retried. Malformed
+history, changed context and refusal/filter outcomes stop before further tools.
+The shared copilot dispatcher terminates on a proposal or native release:
+confirmation notes and exact stored receipt bytes are UI-only, never function
+outputs sent to Foundry. A committed native release retains its exact receipt
+even if later metadata retirement, the deadline or the enclosing question's
+audit write fails; its native release audit was committed atomically. Pending
+proposals and generated answers still require successful fenced completion.
+Managed investigator answer validation reuses the native verbatim-witness and
+source/personal-data verifier, adds closed JSON shapes and rechecks every cited
+page against the committed synthetic registry.
+The copilot and investigator endpoints now use managed turns. They remain
+unavailable until the private project, exact agent versions, gateway allowlist
+and SQL configuration have passed deployment acceptance; there is no direct-model
+production fallback.
+
+Purview is not required for the demo's agents, safety filters or evaluations,
+and this deployment does not add a Purview resource or application integration.
+Assess policies assigned in the target tenant; internal managed-environment
+controls are not requirements for an external tenant. Existing collection
+settings are not disabled automatically and must still satisfy the approved
+content/export boundary before live interactions.
+
+The candidate is opt-in (`foundry_enabled=true`) and requires reviewed
+`foundry_state_profile` and `foundry_model_profile` configuration. The model
+profile has exactly `runtime` and `judge`, each with `name`, pinned `version`,
+`sku` and positive integral `capacity`. No model version is selected implicitly
+or upgraded automatically. These are configuration/evidence inputs, not new
+required Azure ID command arguments; automatic derivation remains unfinished.
+
+When the catalog omits capacity bounds, new deployments must use its explicit
+default. A retained deployment may keep a different capacity only when the saved
+plan proves an unchanged identity/model/SKU and live ARM readback confirms that
+exact successful deployment. Every deployment sharing that profile must qualify;
+a new deployment cannot borrow the exception. Catalog retirement, known bounds
+and full-plan quota checks still apply. Native what-if excludes only `Ignore`
+results; the two candidate resources remain mandatory and unexpected changes
+are rejected.
+
+Project runtime grants derive their principal and workspace identifier from
+read-only ARM outputs. After that deployment completes, a read-only Terraform
+module queries the actual Blob container IDs/ACLs and Cosmos database ID,
+without provisioning or taking ownership of them. The Blob data source uses
+`storage_account_id` for management-plane readback, not legacy data-plane lookup.
+Blob data rights require the exact project containers with public access
+`private` (the provider's normalized `None`); Cosmos data rights require the
+exact `enterprise_memory` database.
+Missing, malformed, foreign or public readbacks stop grants instead of using
+account-wide data scope.
+Separate publisher/evaluator managed identities receive project-scoped custom
+roles; neither is the application identity.
+
+The official setup sample supplies the workspace-ID technique, but the selected
+preview GET schema does not guarantee that response property. Private native
+acceptance must verify the returned identifier, generated store scopes,
+provisioning order, AAD connections and actual role enforcement. Offline tests
+are not that proof. No competing capability-host or store-container owner is
+created, and no operator-supplied workspace ID is required.
+
+Use the same tenant/subscription and retained prefix:
+
+```sh
+scripts/deploy.sh --tenant-id <tenant-id> --subscription-id <subscription-id> \
+  --prefix demoair --stage foundry-plan
+scripts/deploy.sh --tenant-id <tenant-id> --subscription-id <subscription-id> \
+  --prefix demoair --stage foundry-apply
+```
+
+Before planning, provide private `foundry-estimate-inputs.json` in the existing
+deployment state directory. Its three top-level objects are `quotaRequests`,
+`usage` and `meterSkus`. `quotaRequests` maps exact regional catalog usage names
+to `unit` and additional `requested` amount. `usage` maps official meter IDs to
+`unit`, `productName`, positive `quantity` and explicit `usageAssumption`;
+`meterSkus` maps the same IDs to exact retail SKU names. Quantities describe the
+additional resources and usage window being estimated, not a spending cap.
+Neither model deployment capacity-to-quota conversion nor New-runtime store
+capacity is guessed. Current authorized capacity evidence must justify the
+chosen quantities and quota conversion for the exact planned configuration.
+Missing or uncertain inputs stop planning rather than selecting another SKU,
+region or public/key route.
+
+`foundry-plan` saves a real Terraform plan on the executor without applying it;
+its output log stays private there. A closed-field inspector derives the local
+candidate from that saved plan, rejects every deletion/replacement, and admits
+only the reviewed Incremental, debug-disabled account/project template. Raw
+Terraform plan JSON is never returned through Run Command output. Discovery
+then refreshes the selected account, effective assignments, retained inventory,
+providers, regional SKU/model availability, quota, official USD retail prices,
+and native ARM validate/what-if for the exact template.
+
+At each assessment prompt, inspect the private request/discovery files and use
+current authenticated organizational policy sources and source-specific
+New-runtime capacity evidence. Write `foundry-assessments.json` containing
+`policy` and `capacity` objects. Each includes the current `runId`, UTC
+`capturedAt`, `configurationSha256`, `sourceReference`, `sourceSha256` and
+`status` (`approved` for policy, `verified` for capacity). Policy also includes
+`assignmentSha256`; capacity includes `quotaRequestsSha256`. Use SHA-256 of
+canonical sorted compact JSON for that quota mapping. Source hashes identify
+the inspected source content, not the changing run/timestamp envelope.
+An unavailable source or unknown outcome cannot be approved.
+
+Apply gathers evidence, asks confirmation of the exact plan hash and estimate,
+then reacquires everything with a new run ID, including both assessments.
+Old assessment files are removed before each prompt. Changed evidence gives
+`deployment_prerequisite_failed` and zero apply calls; regenerate the plan and
+reconfirm. Missing evidence gives `foundry_preflight_refused`. The accepted
+saved plan is copied, made read-only and hash-checked immediately before apply.
+Private evidence files are mode `0600`; keep them, internal sources, plan logs
+and tenant-linked prices out of Git and public delivery artifacts.
+
+### Publish the managed-agent definitions
+
+Only after the approved Foundry infrastructure plan has been applied and the
+private service/API compatibility gates are satisfied, run the publication
+stage explicitly:
+
+```sh
+scripts/deploy.sh --tenant-id <tenant-id> --subscription-id <subscription-id> \
+  --prefix demoair --stage foundry-agents
+```
+
+The stage reads the nonsecret `foundry_agent_setup` Terraform output, previews
+the exact Copilot and Investigator definition/configuration digests, and asks
+for confirmation before any publisher identity is attached. It uses the
+separate project-scoped publisher identity only for the publication call and
+removes that identity from the executor afterward, including when publication
+fails. If that identity is already attached, the stage stops without changing
+it. An uncertain create is reconciled from its persisted exact-definition
+reservation on a later run; it is never blindly submitted again.
+
+The nonsecret manifest is saved at
+`~/.local/state/airlinedemo/<prefix>/managed-agent-release.json` (or under the
+configured `DEPLOY_STATE_DIR`). Publishing definitions does not enable the
+runtime gateway profile; it remains deny-only until the separately gated
+deployment/release flow supplies exact approved agent versions and digests.
+The manifest records fixed tool names and exact definition/configuration
+digests; those digests bind the complete schemas without sending their larger
+payload through the output-limited Run Command channel.
+
 ## Saved files and resume
 
 Operator files default to `~/.local/state/airlinedemo/<prefix>/`. Set
@@ -145,6 +412,7 @@ invocation. Sensitive files are mode `600`; directories are created mode `700`.
 | `fresh/<prefix>/deploy.tfvars.json`, `backend.hcl` | Candidate application inputs, separate from the previous deployment |
 | `deploy.tfvars.json`, `backend.hcl` | Verified application inputs |
 | `previous-deploy.tfvars.json`, `previous-backend.hcl` | Preserved prior inputs when verification promotes replacements |
+| `managed-agent-release.json` | Exact published agent versions, definition/configuration digests and pinned tool metadata |
 | `build.json`, `release.json` | Exact build/digest and protected-release identifiers for resume |
 | `previous-build-evidence/`, `release-evidence/` | Retained CI and signing evidence |
 | `verified.json` | Successful deployment origin and digest |
@@ -176,6 +444,8 @@ scripts/deploy.sh --tenant-id <tenant-id> --subscription-id <subscription-id> \
 | `login` | Start/check executor device-code authentication |
 | `inspect` | Verify private state access and retain a state snapshot |
 | `prepare` | Generate candidate files without applying application resources |
+| `foundry-plan`, `foundry-preflight`, `foundry-apply` | Save, verify and explicitly apply the gated Foundry infrastructure plan |
+| `foundry-agents` | Preview, confirm and publish exact immutable managed-agent definitions |
 | `platform` | Plan/apply private network foundation and full platform |
 | `database` | Idempotent schema initialization, migrations and permission checks |
 | `configure` | GitHub variables, missing Key Vault values, private runner readiness |

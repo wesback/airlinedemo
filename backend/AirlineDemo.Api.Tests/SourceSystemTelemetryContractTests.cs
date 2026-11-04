@@ -649,7 +649,9 @@ public sealed class SourceSystemTelemetryContractTests
                     .AddAttributes(resourceAttributes);
                 options.SetResourceBuilder(resourceBuilder);
                 options.IncludeScopes = true;
-                options.AddRedaction();
+                var approvalPath = sourceAttributeApprovalPath
+                    ?? Path.Combine(Directory.GetCurrentDirectory(), "docs", "telemetry", "source-system-proposed-additions.md");
+                options.AddRedaction(TelemetryRedaction.ReadApprovedSourceAttributes(approvalPath));
                 options.AddProcessor(new EventCapture(events));
             }));
             builder.ConfigureTestServices(services =>

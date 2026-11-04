@@ -3,11 +3,13 @@ using System.Security.Cryptography;
 using System.Text;
 using AirlineDemo.Api.Admission;
 using AirlineDemo.Api.Auth;
+using AirlineDemo.Api.Copilot;
+using AirlineDemo.Api.Evaluation;
+using AirlineDemo.Api.Foundry;
 using AirlineDemo.Api.Investigation;
 using AirlineDemo.Api.Persistence;
 using AirlineDemo.Api.SourceSystems;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AirlineDemo.Api.Evidence;
@@ -157,7 +159,8 @@ public static class EvidenceEndpoints
         // The accepted documents become the case's evidence basis, so the journey moves past intake.
         IntakeJourneyHandover.RecordIntake(caseStore, scope, record);
         // Runs on every submission until the trace exists, so a retry after a failed append re-runs only the investigation.
-        var handover = await RunInvestigationAsync(record, caseId, scope, session.User.Id, session.User.Role, caseSources, basis, services, investigations, ct);
+        var handover = await RunInvestigationAsync(record, caseId, scope, session.User.Id, session.User.Role, request.HttpContext,
+            caseSources, basis, services, investigations, ct);
         if (handover is not null) IntakeJourneyHandover.RecordInvestigation(caseStore, scope, record, handover);
         return created ? Results.Created($"/api/cases/{caseId}/packages/{packageId}", record) : Results.Ok(record);
     }
@@ -179,6 +182,7 @@ public static class EvidenceEndpoints
         CaseScope scope,
         string actorId,
         string role,
+        HttpContext http,
         EvidenceCaseReadSourceFactory caseSources,
         EvidenceBasisStore basis,
         IServiceProvider services,
@@ -188,13 +192,13 @@ public static class EvidenceEndpoints
         var accepted = record.Documents.Where(d => d.Status == "accepted").Select(d => d.FileName).Distinct(StringComparer.Ordinal).ToList();
         if (accepted.Count == 0) return null;
 
-        // Accepted evidence must not succeed without its investigation trace, so a missing model is a failure, not a skip.
-        var chat = services.GetService<IChatClient>()
-            ?? throw new InvalidOperationException("No investigation model is configured; accepted evidence cannot be investigated.");
-
         var manifest = services.GetRequiredService<ApprovedModelManifest>();
         var registry = services.GetRequiredService<SyntheticContentRegistry>();
         var caseStore = services.GetRequiredService<ICaseStateStore>();
+        var sessions = services.GetRequiredService<DemoSessionStore>();
+        var projectClient = services.GetRequiredService<IManagedProjectClient>();
+        var lifecycle = services.GetRequiredService<ManagedConversationLifecycle>();
+        var coordinator = services.GetRequiredService<ManagedTurnCoordinator>();
 
         var runId = record.PackageId;
         var investigationId = "inv-" + runId;
@@ -221,22 +225,52 @@ public static class EvidenceEndpoints
         var context = new InvestigationTraceContext(runId, investigationId, basisVersion,
             manifest.DeploymentName ?? string.Empty, manifest.ApiVersion ?? string.Empty, manifest.Region ?? string.Empty,
             manifest.ContentFilter ?? string.Empty, "escalate", actorToken);
-        var investigator = new BoundedInvestigator(caseId, caseSources.Create(caseId, accepted, pinned), manifest, registry,
-            manifest.Region ?? string.Empty, $"basis-{basisVersion}", chat,
-            role: role,
-            sourceSystems: new InvestigationSourceSystems(
-                services.GetRequiredService<ISourceSystem<TechnicalPayload>>(),
-                services.GetRequiredService<ISourceSystem<MaintenancePayload>>(),
-                services.GetRequiredService<ISourceSystem<FinancePayload>>(),
-                services.GetRequiredService<ISourceSystem<RecordsPayload>>(),
-                services.GetRequiredService<ISourceSystem<ContractsPayload>>()));
+        var request = new ModelRequest($"basis-{basisVersion}", manifest.Region, evidenceTexts);
+        var source = caseSources.Create(caseId, accepted, pinned);
+        var sourceSystems = new InvestigationSourceSystems(
+            services.GetRequiredService<ISourceSystem<TechnicalPayload>>(),
+            services.GetRequiredService<ISourceSystem<MaintenancePayload>>(),
+            services.GetRequiredService<ISourceSystem<FinancePayload>>(),
+            services.GetRequiredService<ISourceSystem<RecordsPayload>>(),
+            services.GetRequiredService<ISourceSystem<ContractsPayload>>());
 
-        // A gate refusal (evidence not in the synthetic registry), model output that breaks the claim contract, or a failed
-        // model call is a recorded outcome (escalated, rejected): the trace is already appended with it. Any append failure
-        // is a different exception and still reaches the caller.
         try
         {
-            var result = await investigations.ExecuteAsync(scope, context, investigator, evidenceTexts, ClaimKind.Baseline, documents, string.Empty, ct);
+            var result = await investigations.ExecuteManagedAsync(scope, context, evidenceTexts, ClaimKind.Baseline, documents, string.Empty,
+                async (recorder, token) =>
+                {
+                    var turn = new ManagedInvestigatorTurn(caseId, role, source, sourceSystems, manifest, request, registry, recorder);
+                    ManagedAgentTarget Target() => projectClient.Agent("investigator");
+                    ManagedConversationTuple? CurrentTuple()
+                    {
+                        var currentSession = DemoAuthEndpoints.CurrentSession(http, sessions);
+                        if (currentSession is null) throw new ManagedProjectException("unauthenticated");
+                        if (currentSession.User.Role != role) throw new ManagedProjectException("forbidden");
+                        if (!currentSession.User.CaseScopes.Contains(caseId, StringComparer.Ordinal))
+                            throw new ManagedProjectException("case_not_found");
+                        var owner = caseStore.OwnerOf(caseId);
+                        if (owner is null) return null;
+                        var currentScope = caseStore.AuthorizeCase(caseId, owner);
+                        var target = Target();
+                        return new ManagedConversationTuple(currentSession.User.Id, currentSession.User.Role, caseId,
+                            CopilotQuestions.EntitlementFingerprint(currentSession.User), caseStore.Read(currentScope).Revision,
+                            target.Name, target.Version, target.ConfigurationId, request.EvidenceVersion, turn.EvidenceHashesDigest);
+                    }
+
+                    var initial = CurrentTuple() ?? throw new ManagedProjectException("conversation_context_mismatch");
+                    var target = Target();
+                    var traceId = "trace-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
+                    var correlation = new GatewayCorrelation("investigation", traceId, "evidence-investigation", caseId,
+                        target.ConfigurationId, "investigation-v1", "create-conversation");
+                    ModelGatewayTokenomics.ValidateCorrelation(correlation);
+                    var binding = await lifecycle.CreateAsync("investigator", initial, correlation, CurrentTuple, token);
+                    var toolSchemas = JsonSerializer.Serialize(turn.Functions.Select(function =>
+                        new { function.Name, function.Description, Schema = function.JsonSchema.GetRawText() }));
+                    await coordinator.RunAsync("investigator", binding, CurrentTuple, correlation,
+                        new(BoundedInvestigator.Instructions, target.ConfigurationId, toolSchemas), turn.Policy, turn.Input,
+                        turn.DispatchAsync, token);
+                    return new InvestigationResult(turn.Claims ?? throw new InvestigationOutputException("investigator returned no validated claims"), null);
+                }, ct);
             return new InvestigationHandover("approved", string.Empty, result.Claims);
         }
         catch (ModelGateException)
@@ -253,11 +287,26 @@ public static class EvidenceEndpoints
                 []);
         }
         catch (Exception ex) when (ModelFailureDetail.IsModelServiceFailure(ex, ct)
+            || ex is ManagedProjectException { Code: "model_unavailable" }
             || (!ct.IsCancellationRequested && ex is InvestigationLimitExceededException { Breach: InvestigationBreach.Retries }))
         {
             Log(services, "Records investigation model call failed for {CaseId}: {Reason}", caseId, ModelFailureDetail.Describe(ex));
             return new InvestigationHandover("escalated",
                 "The AI agent could not reach the model service, so no findings were produced. The package goes to a technical reviewer, who checks the records manually.",
+                []);
+        }
+        catch (InvestigationLimitExceededException ex)
+        {
+            Log(services, "Records investigation limit reached for {CaseId}: {Reason}", caseId, ex.Breach.ToString());
+            return new InvestigationHandover("escalated",
+                "The AI agent could not complete a verified investigation, so no findings were produced. The package goes to a technical reviewer, who checks the records manually.",
+                []);
+        }
+        catch (ManagedProjectException ex)
+        {
+            Log(services, "Records investigation managed turn failed for {CaseId}: {Reason}", caseId, ex.Code);
+            return new InvestigationHandover("escalated",
+                "The AI agent could not complete a verified investigation, so no findings were produced. The package goes to a technical reviewer, who checks the records manually.",
                 []);
         }
     }

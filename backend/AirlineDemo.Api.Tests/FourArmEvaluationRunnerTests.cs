@@ -369,6 +369,9 @@ public sealed class FourArmEvaluationRunnerTests
         Program.RegisterProductionEvaluationExecutors(services);
         services.AddTransient<FourArmEvaluationRunner>();
         using var provider = services.BuildServiceProvider();
+        var registeredExecutors = provider.GetServices<IEvaluationArmExecutor>().ToArray();
+        Assert.Equal(Enum.GetValues<EvaluationArm>(), registeredExecutors.Select(executor => executor.Arm));
+        Assert.All(registeredExecutors, executor => Assert.IsType<ProductionEvaluationArmExecutor>(executor));
         var output = new StringWriter();
         var error = new StringWriter();
 

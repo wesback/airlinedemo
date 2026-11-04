@@ -161,6 +161,7 @@ public sealed class ContractsSource : ISourceSystem<ContractsPayload>
 {
     private const string ResourceName = "AirlineDemo.Api.Fixtures.sources.contracts.json";
     private readonly IReadOnlyList<SourceRecord<ContractsPayload>> records;
+    internal IReadOnlyList<SourceRecord<ContractsPayload>> CommittedRecords => records;
 
     public ContractsSource()
     {

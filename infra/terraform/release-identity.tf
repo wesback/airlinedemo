@@ -106,6 +106,15 @@ resource "azurerm_key_vault_certificate" "signing" {
       content_type = "application/x-pkcs12"
     }
 
+    lifetime_action {
+      action {
+        action_type = "AutoRenew"
+      }
+      trigger {
+        lifetime_percentage = 80
+      }
+    }
+
     x509_certificate_properties {
       # Notation trust policies reject an identity without C, ST and O attributes.
       subject            = "CN=airline-demo-release-signing, O=Airline Demo, ST=Brussels, C=BE"
