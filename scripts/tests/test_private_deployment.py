@@ -24,6 +24,41 @@ class FoundryRecoveryTests(unittest.TestCase):
     subnet_id = scope + "/providers/Microsoft.Network/virtualNetworks/vnet-demo/subnets/snet-foundry-agent"
     association = "azurerm_subnet_network_security_group_association.foundry_agent[0]"
 
+    def test_association_import_isolates_graph_and_never_applies(self):
+        for fail_init in (False, True):
+            with self.subTest(fail_init=fail_init):
+                paths = []
+
+                def terraform(command, check):
+                    self.assertTrue(check)
+                    root = Path(command[1].removeprefix("-chdir="))
+                    paths.append(root)
+                    config = json.loads((root / "main.tf.json").read_text())
+                    self.assertEqual({"azurerm": {"use_azuread_auth": True}}, config["terraform"]["backend"])
+                    self.assertEqual({"resource", "provider", "terraform"}, set(config))
+                    self.assertEqual({"azurerm_subnet_network_security_group_association"}, set(config["resource"]))
+                    self.assertEqual((ROOT / "infra/terraform/.terraform.lock.hcl").read_bytes(),
+                                     (root / ".terraform.lock.hcl").read_bytes())
+                    self.assertEqual("none", config["provider"]["azurerm"]["resource_provider_registrations"])
+                    if command[2] == "init":
+                        self.assertEqual(["init", "-input=false", "-lockfile=readonly",
+                                          "-backend-config=" + str(Path("backend.hcl").resolve())], command[2:])
+                        if fail_init:
+                            raise subprocess.CalledProcessError(1, command)
+                    else:
+                        self.assertEqual(["import", "-input=false", self.association, self.subnet_id], command[2:])
+
+                with patch.object(subprocess, "run", side_effect=terraform) as run:
+                    if fail_init:
+                        with self.assertRaises(subprocess.CalledProcessError):
+                            deployment.import_foundry_network((self.association, self.subnet_id),
+                                                              "backend.hcl", "subscription", "tenant")
+                    else:
+                        deployment.import_foundry_network((self.association, self.subnet_id),
+                                                          "backend.hcl", "subscription", "tenant")
+                    self.assertEqual(1 if fail_init else 2, run.call_count)
+                self.assertTrue(all(not path.exists() for path in paths))
+
     def test_price_read_retries_only_transient_transport_failures(self):
         failures = [deployment.URLError(ConnectionResetError("reset")), TimeoutError("timeout")]
         failures.extend(deployment.HTTPError("https://prices.azure.com", status, "unavailable", None, None)
@@ -369,6 +404,67 @@ class PrivateDeploymentTests(unittest.TestCase):
                 "NextPageLink": None}
         return candidate, sources, providers, cloud, page
 
+    def test_foundry_fingerprint_projects_actual_search_location_and_sku(self):
+        template, parameters = self.foundry_template("/synthetic")
+        wrapper = {"address": "azurerm_resource_group_template_deployment.foundry[0]", "values": {
+            "deployment_mode": "Incremental", "debug_level": "none",
+            "template_content": json.dumps(template), "parameters_content": json.dumps(parameters)}}
+        search = {"address": "azurerm_search_service.foundry[0]", "values": {
+            "location": "germanywestcentral", "sku": "standard"}}
+        plan = {"planned_values": {"root_module": {"resources": [wrapper, search]}}, "resource_changes": []}
+        self.assertEqual(search["values"], deployment.foundry_plan_fingerprint(plan, b"saved", "a" * 40)["search"])
+
+    def test_foundry_german_search_uses_saved_plan_region_and_rejects_missing_capacity(self):
+        for scenario in ("available", "no-quota", "unsupported"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                instance = self.foundry_executor(directory)
+                candidate, _, providers, cloud, _ = self.foundry_cloud(instance)
+                candidate.update(startedAt=deployment.utc_now(), runId="current")
+                projection = json.loads(deployment.zlib.decompress(
+                    deployment.base64.b64decode(instance.execute.return_value)))
+                projection["search"] = {"location": "germanywestcentral", "sku": "standard"}
+                instance.execute.return_value = deployment.base64.b64encode(
+                    deployment.zlib.compress(json.dumps(projection).encode())).decode()
+                if scenario != "unsupported":
+                    providers["Microsoft.Search"]["resourceTypes"][0]["locations"] = ["Germany West Central"]
+                observed = []
+
+                def regional_cloud(*args, **kwargs):
+                    if args[0] == "rest":
+                        observed.append(args[args.index("--url") + 1])
+                        return {"value": [{"name": {"value": "standard"}, "currentValue": 0,
+                                           "limit": 0 if scenario == "no-quota" else 12}]}
+                    return cloud(*args, **kwargs)
+
+                with patch.object(deployment, "az", side_effect=regional_cloud):
+                    if scenario == "available":
+                        instance.foundry_discovery(candidate)
+                    else:
+                        with self.assertRaises(ValueError):
+                            instance.foundry_discovery(candidate)
+                self.assertEqual([] if scenario == "unsupported" else [
+                    "https://management.azure.com/subscriptions/" + instance.args.subscription_id +
+                    "/providers/Microsoft.Search/locations/germanywestcentral/usages?api-version=2025-05-01"], observed)
+
+    def test_german_price_meter_is_allowed_only_for_search(self):
+        for product in ("Azure AI Search", "Synthetic"):
+            with self.subTest(product=product), tempfile.TemporaryDirectory() as directory:
+                instance = self.foundry_executor(directory)
+                candidate, _, _, _, page = self.foundry_cloud(instance)
+                meter = candidate["meterIds"][0]
+                candidate.update(startedAt=deployment.utc_now(), runId="current")
+                candidate["usage"][meter].update(region="germanywestcentral", productName=product)
+                page["Items"][0].update(armRegionName="germanywestcentral", productName=product)
+                with patch.object(deployment, "urlopen", return_value=io.StringIO(json.dumps(page))) as prices:
+                    if product == "Azure AI Search":
+                        self.assertEqual(0.3, instance.foundry_quote(candidate)["estimatedCost"])
+                        self.assertEqual(["armRegionName eq 'germanywestcentral' and meterId eq '" + meter + "'"],
+                                         parse_qs(deployment.urlparse(prices.call_args.args[0]).query)["$filter"])
+                    else:
+                        with self.assertRaises(ValueError):
+                            instance.foundry_quote(candidate)
+                        prices.assert_not_called()
+
     @patch.object(deployment, "run", return_value="a" * 40)
     def test_foundry_cli_preflight_acquires_authentication_inventory_prices_and_native_checks(self, run):
         with tempfile.TemporaryDirectory() as directory:
@@ -527,7 +623,8 @@ class PrivateDeploymentTests(unittest.TestCase):
                         raw = json.loads((instance.directory / "foundry-discovery.json").read_text())
                         self.assertEqual([live], raw["retainedModels"])
                         self.assertEqual(deployment.canonical_sha256(
-                            {name: raw[name] for name in ("providers", "skus", "models", "retainedModels")}),
+                            {name: raw[name] for name in ("providers", "skus", "models", "retainedModels",
+                                                         "search", "searchUsage")}),
                             result["provider"]["sourceSha256"])
                     else:
                         with self.assertRaises(ValueError):
@@ -828,12 +925,15 @@ class PrivateDeploymentTests(unittest.TestCase):
                         live["networkSecurityGroup"]["id"] = live["networkSecurityGroup"]["id"].replace(
                             "/rg-demo/", "/rg-foreign/")
                     native = Mock(return_value=live)
+                    importer = Mock()
                     with patch.object(runpy, "run_path", return_value={
-                            "foundry_network_import": deployment.foundry_network_import, "az": native}), \
+                            "foundry_network_import": deployment.foundry_network_import, "az": native,
+                            "import_foundry_network": importer}), \
                             patch.object(subprocess, "check_output", return_value=json.dumps(current).encode()), \
                             patch.object(subprocess, "run") as imported, \
                             patch.dict(os.environ, {"AZURE_SUBSCRIPTION_ID": fixture.scope.split("/")[2],
-                                                    "RESOURCE_GROUP_NAME": "rg-demo", "TFVARS_FILE": "vars.json"}):
+                                                    "RESOURCE_GROUP_NAME": "rg-demo", "TFVARS_FILE": "vars.json",
+                                                    "AZURE_TENANT_ID": "tenant", "BACKEND_CONFIG_FILE": "backend.hcl"}):
                         if scenario == "foreign":
                             with self.assertRaises(ValueError):
                                 exec(script, {})
@@ -842,10 +942,11 @@ class PrivateDeploymentTests(unittest.TestCase):
                         if scenario == "existing":
                             native.assert_called_once_with("network", "vnet", "subnet", "show",
                                                            "--ids", fixture.subnet_id, private=True)
-                            imported.assert_called_once_with([
-                                "terraform", "-chdir=infra/terraform", "import", "-input=false",
-                                "-var-file=vars.json", fixture.association, fixture.subnet_id], check=True)
+                            importer.assert_called_once_with((fixture.association, fixture.subnet_id),
+                                                             "backend.hcl", fixture.scope.split("/")[2], "tenant")
+                            imported.assert_not_called()
                         else:
+                            importer.assert_not_called()
                             imported.assert_not_called()
                             if scenario == "managed":
                                 native.assert_not_called()

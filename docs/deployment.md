@@ -149,17 +149,25 @@ When fresh rebuild settings exist, Foundry planning uses that variable/backend
 pair rather than the previous deployment's saved settings. Missing members of
 the fresh pair stop planning instead of mixing old and new inputs.
 
+The optional `foundry_state_profile.search_location` selects `swedencentral`
+or `germanywestcentral`; omitting it preserves the application's region.
+This changes only Search: the Foundry account and its VNet remain together,
+and the Search private endpoint stays in that VNet's region. Planning checks
+the selected Search region's provider support and quota. Quota does not
+guarantee physical allocation; current policy and private connectivity checks
+still apply.
+
 On partial-apply recovery, planning adopts an existing agent-subnet NSG
 association into Terraform state when both exact resource IDs belong to the
 deployment's resource group. This handles an NSG attached by tenant automation
 before the first association completed. Import does not change the live NSG;
 any subsequent association change remains visible in the complete saved plan.
 Foreign subnet readback or NSG scope stops reconciliation.
-Import can still fail before the Foundry project exists because Terraform
-evaluates generated-store readback and cannot find `enterprise_memory`.
-This stops recovery before a new saved plan; do not treat it as successful
-adoption or manually create service-owned stores. Retain the partial state
-and resolve the provisioning dependency before resuming.
+State adoption uses a temporary association-only Terraform configuration with
+the same remote backend, Entra authentication, provider lock and state lock.
+This avoids evaluating service-owned stores before Foundry creates them.
+It runs only init/import, never apply; the subsequent complete plan still
+checks the full topology and generated-store grant scopes.
 
 The provisioning identity can be an Entra user or service principal; Azure
 resolves its principal type for the two scoped store-provisioning grants.

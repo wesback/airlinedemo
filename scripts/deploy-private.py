@@ -98,6 +98,32 @@ def foundry_network_import(state, scope, read_subnet):
     return address, subnet_id
 
 
+def import_foundry_network(adoption, backend_config, subscription_id, tenant_id):
+    """Import only the existing association, without evaluating uncreated project stores."""
+    with tempfile.TemporaryDirectory(prefix="foundry-network-import-") as directory:
+        root = Path(directory)
+        (root / ".terraform.lock.hcl").write_bytes(Path("infra/terraform/.terraform.lock.hcl").read_bytes())
+        configuration = {
+            "terraform": {
+                "backend": {"azurerm": {"use_azuread_auth": True}},
+                "required_providers": {"azurerm": {"source": "hashicorp/azurerm", "version": "~> 4.0"}},
+            },
+            "provider": {"azurerm": {
+                "subscription_id": subscription_id, "tenant_id": tenant_id,
+                "resource_provider_registrations": "none", "features": {},
+            }},
+            "resource": {"azurerm_subnet_network_security_group_association": {"foundry_agent": {
+                "count": 1, "subnet_id": adoption[1],
+                "network_security_group_id": adoption[1].split("/providers/")[0] +
+                "/providers/Microsoft.Network/networkSecurityGroups/nsg-foundry-agent",
+            }}},
+        }
+        write_private(root / "main.tf.json", json.dumps(configuration))
+        subprocess.run(["terraform", "-chdir=" + directory, "init", "-input=false",
+                        "-lockfile=readonly", "-backend-config=" + str(Path(backend_config).resolve())], check=True)
+        subprocess.run(["terraform", "-chdir=" + directory, "import", "-input=false", *adoption], check=True)
+
+
 def evidence_time(value):
     instant = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
     if instant.tzinfo is None or instant.utcoffset() is None:
@@ -161,6 +187,11 @@ def foundry_plan_fingerprint(plan, plan_bytes, source_commit, scope=None):
                          key=canonical_sha256),
         "retainedModels": sorted(retained, key=canonical_sha256),
     }
+    search = [resource["values"] for resource in resources
+              if resource["address"] == "azurerm_search_service.foundry[0]"]
+    if search:
+        require_evidence(len(search) == 1)
+        result["search"] = {key: search[0][key] for key in ("location", "sku")}
     if scope is not None:
         template, parameters = json.loads(wrapper["template_content"]), json.loads(wrapper["parameters_content"])
         validate_foundry_template(template, parameters, scope)
@@ -296,8 +327,8 @@ scope = f"/subscriptions/{os.environ['AZURE_SUBSCRIPTION_ID']}/resourceGroups/{o
 adoption = helpers["foundry_network_import"](state, scope, lambda resource_id:
     helpers["az"]("network", "vnet", "subnet", "show", "--ids", resource_id, private=True))
 if adoption is not None:
-    subprocess.run(["terraform", "-chdir=infra/terraform", "import", "-input=false",
-                    "-var-file=" + os.environ["TFVARS_FILE"], *adoption], check=True)
+    helpers["import_foundry_network"](adoption, os.environ["BACKEND_CONFIG_FILE"],
+                                     os.environ["AZURE_SUBSCRIPTION_ID"], os.environ["AZURE_TENANT_ID"])
 PY
 terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out=/var/lib/airlinedemo/foundry.tfplan >> /var/lib/airlinedemo/foundry-plan.log 2>&1
 """)
@@ -377,6 +408,9 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
         require_evidence(canonical_sha256(assignments) == request["bindings"]["assignmentSha256"])
         require_evidence(canonical_sha256(inventory) == request["bindings"]["retainedResourceSha256"])
         providers = []
+        search = fingerprint.get("search")
+        search_region = search["location"] if search else self.args.location
+        require_evidence(search_region in ("swedencentral", "germanywestcentral"))
         for namespace, types in (
                 ("Microsoft.CognitiveServices", ("accounts", "accounts/projects")),
                 ("Microsoft.DocumentDB", ("databaseAccounts",)),
@@ -389,11 +423,22 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
             for name in types:
                 matches = [row for row in provider["resourceTypes"] if row["resourceType"] == name]
                 require_evidence(len(matches) == 1)
-                require_evidence("swedencentral" in {location.replace(" ", "").lower()
-                                                     for location in matches[0]["locations"]})
+                region = search_region if namespace == "Microsoft.Search" else self.args.location
+                require_evidence(region in {location.replace(" ", "").lower()
+                                           for location in matches[0]["locations"]})
                 if namespace == "Microsoft.CognitiveServices":
                     require_evidence("2026-07-15-preview" in matches[0]["apiVersions"])
             providers.append(provider)
+        search_usage = None
+        if search:
+            search_usage = az("rest", "--method", "get", "--url",
+                              f"https://management.azure.com/subscriptions/{self.args.subscription_id}"
+                              f"/providers/Microsoft.Search/locations/{search_region}/usages?api-version=2025-05-01",
+                              *subscription, private=True)
+            matches = [row for row in search_usage["value"] if row["name"]["value"] == search["sku"]]
+            require_evidence(len(matches) == 1)
+            require_evidence(evidence_number(matches[0]["limit"]) -
+                             evidence_number(matches[0]["currentValue"]) >= 1)
         skus = az("cognitiveservices", "account", "list-skus", "--kind", "AIServices",
                   "--location", self.args.location, *subscription, private=True)
         require_evidence(any(row["name"] == "S0" and row["kind"] == "AIServices" and not row["restrictions"]
@@ -457,10 +502,11 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
             quota.append({"name": name, **requested, "available": float(available)})
         raw = {"runId": request["runId"], "assignments": assignments, "inventory": inventory,
                "providers": providers, "skus": skus, "models": models, "usages": usages,
-               "retainedModels": retained_readbacks}
+               "retainedModels": retained_readbacks, "search": search, "searchUsage": search_usage}
         write_private(self.directory / "foundry-discovery.json", json.dumps(raw, indent=2))
         return {"provider": {"status": "available", "sourceSha256": canonical_sha256(
-                    {"providers": providers, "skus": skus, "models": models, "retainedModels": retained_readbacks})},
+                    {"providers": providers, "skus": skus, "models": models, "retainedModels": retained_readbacks,
+                     "search": search, "searchUsage": search_usage})},
                 "quota": sorted(quota, key=lambda row: row["name"])}
 
     def foundry_quote(self, request):
@@ -469,7 +515,8 @@ terraform -chdir=infra/terraform plan -input=false -var-file="$TFVARS_FILE" -out
             require_evidence(GUID.fullmatch(meter_id) is not None)
             usage = request["usage"][meter_id]
             region = usage.get("region", "swedencentral")
-            require_evidence(region in ("swedencentral", "Global", ""))
+            require_evidence(region in ("swedencentral", "Global", "") or
+                             (region == "germanywestcentral" and usage["productName"] == "Azure AI Search"))
             url = "https://prices.azure.com/api/retail/prices?" + urlencode({
                 "currencyCode": "'USD'", "$filter": f"armRegionName eq '{region}' and meterId eq '{meter_id}'"})
             rows, seen = [], set()

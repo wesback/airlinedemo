@@ -8,12 +8,20 @@ variable "foundry_state_profile" {
     search_sku                     = string
     search_partitions              = number
     search_replicas                = number
+    search_location                = optional(string)
     storage_replication_type       = string
     blob_retention_days            = number
     container_retention_days       = number
   })
   default = null
 
+  validation {
+    condition = var.foundry_state_profile == null ? true : (
+      var.foundry_state_profile.search_location == null ||
+      contains(["swedencentral", "germanywestcentral"], var.foundry_state_profile.search_location)
+    )
+    error_message = "Foundry Search location must be Sweden Central or Germany West Central."
+  }
   validation {
     condition     = !var.foundry_enabled || var.foundry_state_profile != null
     error_message = "Enabling Foundry requires an explicit foundry_state_profile; capacity and retention must not be guessed."
@@ -115,7 +123,7 @@ resource "azurerm_storage_account" "foundry" {
 resource "azurerm_search_service" "foundry" {
   count                         = local.foundry_state_count
   name                          = "srch-${local.name_prefix}-${local.name_suffix}-foundry"
-  location                      = azurerm_resource_group.demo.location
+  location                      = coalesce(var.foundry_state_profile.search_location, azurerm_resource_group.demo.location)
   resource_group_name           = azurerm_resource_group.demo.name
   sku                           = var.foundry_state_profile.search_sku
   partition_count               = var.foundry_state_profile.search_partitions
