@@ -101,6 +101,50 @@ public sealed class ManagedHistoryContractTests
         }
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("unreturned-citation")]
+    [InlineData("extra-error-field")]
+    [InlineData("missing-output")]
+    public void CopilotSummaries_AcceptsClosedToolDenialsWithoutTrustingTheirContent(string? mutation)
+    {
+        var error = JsonNode.Parse("""{"contractVersion":1,"httpStatus":403,"error":{"code":"selected_case_mismatch"}}""")!;
+        if (mutation == "extra-error-field") error["error"]!["text"] = "FOREIGN_CONTENT";
+        var answer = JsonNode.Parse("""{"answer":"The other case was not accessed.","citations":[]}""")!;
+        if (mutation == "unreturned-citation")
+            answer["citations"]!.AsArray().Add(JsonNode.Parse("""{"sourceId":"technical","recordId":"unread","recordVersion":1}"""));
+        var items = ManagedHistoryContract.CopilotQuestion("Summarize the selected case.");
+        items[0]!["id"] = "user-1";
+        items[0]!["type"] = "message";
+        items[0]!["status"] = "completed";
+        items.Add(new JsonObject
+        {
+            ["id"] = "call-1", ["type"] = "function_call", ["call_id"] = "denied-1",
+            ["name"] = "get_case_summary", ["arguments"] = """{"caseId":"cp-case-b"}"""
+        });
+        if (mutation != "missing-output")
+            items.Add(new JsonObject
+            {
+                ["id"] = "output-1", ["type"] = "function_call_output", ["call_id"] = "denied-1",
+                ["output"] = error.ToJsonString()
+            });
+        items.Add(new JsonObject
+        {
+            ["id"] = "answer-1", ["type"] = "message", ["status"] = "completed", ["role"] = "assistant",
+            ["content"] = new JsonArray(new JsonObject { ["type"] = "output_text", ["text"] = answer.ToJsonString() })
+        });
+        if (mutation is not null)
+            Assert.Equal("conversation_history_invalid", Assert.Throws<ManagedProjectException>(() =>
+                ManagedHistoryContract.CopilotSummaries(items.ToJsonString(), "cp-case-a")).Code);
+        else
+        {
+            var summary = Assert.Single(ManagedHistoryContract.CopilotSummaries(items.ToJsonString(), "cp-case-a"));
+            Assert.Equal("Summarize the selected case.", summary.Question);
+            Assert.Equal("The other case was not accessed.", summary.Answer);
+            Assert.Empty(summary.Citations);
+        }
+    }
+
     [Fact]
     public void ManagedCopilotObservation_ReusesStructuralProjectionWithoutRawSourceOrNotes()
     {

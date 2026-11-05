@@ -1242,9 +1242,11 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ProductionHost_ManagedConversation_ContinuesAndReturnsSanitizedHistory(bool nativeMetadata)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ProductionHost_ManagedConversation_ContinuesAndReturnsSanitizedHistory(bool nativeMetadata, bool rejectedTool)
     {
         if (nativeMetadata)
             ((ScriptedManagedProjectClient)_factory.Services.GetRequiredService<IManagedProjectClient>()).HistoryItem = item =>
@@ -1258,7 +1260,9 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
                     };
             };
         var session = Session("technical-reviewer");
-        _chat.Reset(_ => Final("First answer."));
+        _chat.Reset(index => rejectedTool && index == 0
+            ? Calls(("denied-case", "get_case_summary", """{"caseId":"cp-case-b"}"""))
+            : Final("First answer."));
 
         var first = await Ask(session, Body("What are the open points?"));
 
@@ -1266,6 +1270,10 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
         var handle = (string)first.Json["conversationHandle"]!;
         Assert.Equal(43, handle.Length);
         Assert.Equal("active", (string?)first.Json["conversationState"]);
+        if (rejectedTool)
+        {
+            Assert.Equal(ToolError(403, "selected_case_mismatch"), Assert.Single(_chat.Observations(1)).ToJsonString());
+        }
 
         var freshSession = _factory.Services.GetRequiredService<DemoSessionStore>().Create(session.User);
         _chat.Reset(_ => Final("Here is the follow-up."));
@@ -1287,6 +1295,8 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
         Assert.Equal("Tell me more.", (string?)history.Json["turns"]![1]!["question"]);
         Assert.Equal("Here is the follow-up.", (string?)history.Json["turns"]![1]!["answer"]);
         Assert.DoesNotContain("conversation-1", history.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("cp-case-b", history.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("selected_case_mismatch", history.Body, StringComparison.Ordinal);
     }
 
     [Fact]
