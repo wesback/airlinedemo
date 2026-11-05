@@ -36,6 +36,7 @@ public sealed class ReleaseIdentityContractTests
                 "build_acr_push",
                 "build_runner_token_secret",
                 "foundry_gateway",
+                "foundry_gateway_runtime",
                 "foundry_operator",
                 "foundry_provisioner_blob",
                 "foundry_provisioner_cosmos",
