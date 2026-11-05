@@ -44,11 +44,11 @@ public static class ManagedHistoryContract
 {
     private static ManagedProjectException Invalid() => new("conversation_history_invalid");
 
-    public static ManagedHistoryPolicy CopilotPolicy(string? selectedCaseId) => CreateCopilotPolicy(selectedCaseId, false);
+    public static ManagedHistoryPolicy CopilotPolicy(string? selectedCaseId) => CreateCopilotPolicy(selectedCaseId, false, true);
 
-    public static ManagedHistoryPolicy CopilotContinuationPolicy(string? selectedCaseId) => CreateCopilotPolicy(selectedCaseId, true);
+    public static ManagedHistoryPolicy CopilotContinuationPolicy(string? selectedCaseId) => CreateCopilotPolicy(selectedCaseId, true, false);
 
-    private static ManagedHistoryPolicy CreateCopilotPolicy(string? selectedCaseId, bool allowToolRejections)
+    private static ManagedHistoryPolicy CreateCopilotPolicy(string? selectedCaseId, bool allowToolRejections, bool validateCitations)
     {
         var returned = new HashSet<CopilotSourceRef>();
         return new(
@@ -57,7 +57,7 @@ public static class ManagedHistoryContract
                 returned.Clear();
                 return CopilotInputContract.IsValidQuestion(text);
             },
-            allowToolRejections ? CopilotQuestions.IsValidAnswerEnvelope : text => CopilotQuestions.IsValidAnswer(text, returned),
+            validateCitations ? text => CopilotQuestions.IsValidAnswer(text, returned) : CopilotQuestions.IsValidAnswerEnvelope,
             (name, arguments) =>
             {
                 if (allowToolRejections) return true;
@@ -222,7 +222,7 @@ public static class ManagedHistoryContract
     public static IReadOnlyList<ManagedCopilotTurnSummary> CopilotSummaries(string json, string selectedCaseId,
         ManagedAgentTarget? target = null)
     {
-        var history = Validate(json, CopilotPolicy(selectedCaseId) with { Agent = target }).CopyItems();
+        var history = Validate(json, CreateCopilotPolicy(selectedCaseId, true, true) with { Agent = target }).CopyItems();
         var calls = history.OfType<JsonObject>().Where(item => Text(item, "type") == "function_call")
             .Select(item => Text(item, "call_id")).ToHashSet(StringComparer.Ordinal);
         var outputs = history.OfType<JsonObject>().Where(item => Text(item, "type") == "function_call_output")
