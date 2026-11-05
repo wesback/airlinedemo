@@ -199,7 +199,7 @@ public sealed class BoundedInvestigator(
     internal static string BuildPrompt(IReadOnlyList<string> documents)
     {
         var prompt = new StringBuilder(
-            "Investigate the case documents below and return the claims JSON. For every source-backed claim, add sourceWitnesses entries using the exact sourceId, recordId and recordVersion returned by a permitted source tool.\n");
+            "Investigate the case documents below and return the claims JSON. First call get_case_inventory to learn the exact document IDs, then get_source_page with one of those IDs and page 1. Use the exact returned document ID in each witness, never a document title. For every source-backed claim, add sourceWitnesses entries using the exact sourceId, recordId and recordVersion returned by a permitted source tool.\n");
         foreach (var text in documents)
         {
             prompt.Append(UntrustedBegin).Append('\n').Append(text).Append('\n').Append(UntrustedEnd).Append('\n');

@@ -199,6 +199,26 @@ public sealed class ManagedHistoryContractTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task ManagedInvestigatorInventory_UsesOnlyExactCaseMetadata(bool tamperInventory)
+    {
+        const string evidence = "SYNTHETIC EVIDENCE: aircraft evidence v1.";
+        var source = new ManagedClaimSource(evidence, "case-001");
+        var turn = new ManagedInvestigatorTurn("case-001", "presenter", source,
+            new(new TechnicalSource(), new MaintenanceSource(), new FinanceSource(), new RecordsSource(), new ContractsSource()),
+            FakeApprovedManifest.Approved(), new ModelRequest("evidence-v1", "swedencentral", evidence),
+            SyntheticContentRegistry.FromCommittedFixtures());
+        var args = new JsonObject();
+        var output = await turn.DispatchAsync(new("inventory-1", CaseReadTools.InventoryTool, args),
+            TestContext.Current.CancellationToken);
+        Assert.Equal($"{BoundedInvestigator.UntrustedBegin}\ndocument-1\n{BoundedInvestigator.UntrustedEnd}", (string?)output["text"]);
+        if (tamperInventory) output["text"] = $"{BoundedInvestigator.UntrustedBegin}\nforeign-document\n{BoundedInvestigator.UntrustedEnd}";
+        Assert.Equal(!tamperInventory, turn.Policy.ToolOutput(CaseReadTools.InventoryTool, args, output));
+        Assert.Equal(0, source.PageReads);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void ManagedInvestigatorHistory_RestoresOnlyExactCommittedSourceWitnesses(bool tamperRecord)
     {
         const string evidence = "SYNTHETIC EVIDENCE: aircraft evidence v1.";
