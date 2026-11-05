@@ -67,6 +67,7 @@ public sealed class ManagedTurnCoordinator(IManagedProjectClient client, Managed
         if (policy.Workload is not null && policy.Workload != workload || policy.Context is not null && !policy.Context(conversation.Tuple))
             throw new ManagedProjectException("conversation_context_mismatch");
         var target = client.Agent(workload);
+        policy = policy with { Agent = target };
         if (target.Name != conversation.Tuple.AgentName || target.Version != conversation.Tuple.AgentVersion ||
             target.ConfigurationId != conversation.Tuple.ConfigurationDigest || correlation.ModelConfiguration != target.ConfigurationId)
             throw new ManagedProjectException("managed_agent_unconfigured");
@@ -251,7 +252,10 @@ public sealed class ManagedTurnCoordinator(IManagedProjectClient client, Managed
         var outputTokens = Usage("output_tokens");
         if (inputTokens > 16000) throw new ManagedProjectException("copilot_input_token_limit");
         if (outputTokens > 2000) throw new ManagedProjectException("copilot_output_token_limit");
-        return new(Identifier(response["id"]), output, inputTokens, outputTokens);
+        var responseId = Identifier(response["id"]);
+        foreach (var item in output.OfType<JsonObject>())
+            ManagedHistoryContract.ValidateNativeMetadata(item, target, responseId);
+        return new(responseId, output, inputTokens, outputTokens);
     }
 
     private static string Identifier(JsonNode? node) =>
