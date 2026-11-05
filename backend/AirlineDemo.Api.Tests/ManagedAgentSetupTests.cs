@@ -28,8 +28,12 @@ public sealed class ManagedAgentSetupTests : IDisposable
             Assert.NotEmpty((JsonArray)spec.Definition["tools"]!);
             Assert.Matches("^[0-9a-f]{64}$", spec.DefinitionSha256);
             Assert.Matches("^[0-9a-f]{64}$", spec.ConfigurationId);
-            Assert.NotNull(spec.Definition["text"]?["format"]?["schema"]);
         });
+        Assert.Equal("json_schema", specs[0].Definition["text"]!["format"]!["type"]!.GetValue<string>());
+        Assert.Equal("object", specs[0].Definition["text"]!["format"]!["schema"]!["type"]!.GetValue<string>());
+        Assert.Equal("{\"format\":{\"type\":\"text\"}}", specs[1].Definition["text"]!.ToJsonString());
+        Assert.Equal(ManagedAgentDefinitionCatalog.InvestigatorInstructions,
+            specs[1].Definition["instructions"]!.GetValue<string>());
         Assert.Equal(
             ["advance_stage", "get_approved_requirements", "get_case_inventory", "get_case_summary", "get_open_points",
                 "get_processing_status", "get_source_page", "get_source_record", "list_my_cases", "list_source_records",
