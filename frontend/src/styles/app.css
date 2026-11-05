@@ -674,7 +674,8 @@ button:disabled { cursor: not-allowed; }
 @media (max-width: 640px) {
   .av-topbar { gap: 10px; padding: 0 12px; }
   .av-topbar-brand .av-logo-text { display: none; }
-  .av-modes { margin-left: 0; }
+  .av-modes { flex: 1 1 0; min-width: 0; margin-left: 0; overflow-x: auto; }
+  .av-modes button { flex: 0 0 auto; }
   .av-modes button svg { display: none; }
   .av-kpi { min-width: calc(50% - 6px); }
   .av-ai-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }

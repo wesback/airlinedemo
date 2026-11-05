@@ -238,6 +238,44 @@ describe('activity trail', () => {
 });
 
 describe('journey app', () => {
+  it('shows Data flows only after sign-in from its direct route', async () => {
+    stubApi();
+    window.history.replaceState({}, '', '/data-flows');
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Sign in to the demo' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Data flows' })).toBeNull();
+    await signInAs('Riley Reviewer');
+
+    expect(await screen.findByRole('heading', { name: 'Data flows', level: 1 })).toBeTruthy();
+    expect(window.location.pathname).toBe('/data-flows');
+  });
+
+  it('opens Data flows from global navigation and preserves the unknown-route fallback', async () => {
+    stubApi();
+    render(<App />);
+    await signInAs('Riley Reviewer');
+    await screen.findByRole('heading', { name: 'Return pool' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Data flows' }));
+    expect(await screen.findByRole('heading', { name: 'Data flows', level: 1 })).toBeTruthy();
+    expect(window.location.pathname).toBe('/data-flows');
+
+    window.history.pushState({}, '', '/not-a-route');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(await screen.findByRole('heading', { name: 'Return pool' })).toBeTruthy();
+  });
+
+  it('renders the Data flows page without Hangar Data Room content', async () => {
+    stubApi();
+    window.history.replaceState({}, '', '/data-flows');
+    render(<App />);
+    await signInAs('Riley Reviewer');
+
+    expect(await screen.findByRole('heading', { name: 'Data flows', level: 1 })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Data Room aircraft' })).toBeNull();
+  });
+
   it('blocks the next gate with exact missing sources', async () => {
     stubArrivalScenario('collecting');
     window.history.replaceState({}, '', '/cases/case-001');
@@ -509,5 +547,6 @@ describe('journey app', () => {
     fireEvent.click(screen.getByRole('button', { name: '3D hangar' }));
     expect(window.location.pathname).toBe('/hangar');
     expect(screen.getByRole('button', { name: '3D hangar' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('heading', { name: 'Data flows' })).toBeNull();
   });
 });

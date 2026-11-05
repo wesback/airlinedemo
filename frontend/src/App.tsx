@@ -6,6 +6,7 @@ import SignInScreen from './journey/SignInScreen';
 import TopBar, { type Mode } from './journey/TopBar';
 import PoolBoard from './journey/PoolBoard';
 import CaseJourney from './journey/CaseJourney';
+import DataFlowWalkthrough from './journey/DataFlowWalkthrough';
 import CopilotPanel from './journey/CopilotPanel';
 import { useFleet } from './journey/useFleet';
 import { useThemeControl } from './theme/themeControl';
@@ -15,16 +16,19 @@ export type { HangarEntryAppProps } from './hangar/HangarMode';
 
 const HangarMode = lazy(() => import('./hangar/HangarMode'));
 
-type Route = { view: 'board' } | { view: 'case'; caseId: string } | { view: 'hangar' };
+type Route = { view: 'board' } | { view: 'case'; caseId: string } | { view: 'hangar' } | { view: 'data-flows' };
 
 export function parseRoute(path: string): Route {
   if (path === '/hangar' || path.startsWith('/hangar/')) return { view: 'hangar' };
+  if (path === '/data-flows') return { view: 'data-flows' };
   const match = /^\/cases\/([^/]+)\/?$/.exec(path);
   if (match) return { view: 'case', caseId: decodeURIComponent(match[1]) };
   return { view: 'board' };
 }
 
-const pathFor = (route: Route) => route.view === 'hangar' ? '/hangar' : route.view === 'case' ? `/cases/${encodeURIComponent(route.caseId)}` : '/';
+const pathFor = (route: Route) => route.view === 'hangar' ? '/hangar'
+  : route.view === 'case' ? `/cases/${encodeURIComponent(route.caseId)}`
+    : route.view === 'data-flows' ? '/data-flows' : '/';
 
 export default function App(hangarProps: HangarEntryAppProps = {}) {
   const [apiState, setApiState] = useState<'checking' | 'ready' | 'unavailable'>('checking');
@@ -101,8 +105,9 @@ function SignedInShell({ session, route, navigate, notice, onSwitchPersona, onSi
   return (
     <div className={`av-app${mode === 'hangar' ? ' av-app-hangar' : ''}`}>
       <a className="av-skip" href="#main">Skip to content</a>
-      <TopBar session={session} mode={mode} theme={theme} onToggleTheme={toggle}
+      <TopBar session={session} mode={mode} dataFlowsActive={route.view === 'data-flows'} theme={theme} onToggleTheme={toggle}
         onMode={(next) => navigate(next === 'hangar' ? { view: 'hangar' } : { view: 'board' })}
+        onDataFlows={() => navigate({ view: 'data-flows' })}
         onHome={() => navigate({ view: 'board' })} onSwitchPersona={onSwitchPersona} onSignOut={onSignOut} />
       <p className="av-visually-hidden" role="status">{notice}</p>
       {route.view === 'board' && (
@@ -114,6 +119,7 @@ function SignedInShell({ session, route, navigate, notice, onSwitchPersona, onSi
           onOpenCase={(caseId) => navigate({ view: 'case', caseId })}
           onSwitchPersona={onSwitchPersona} onChanged={() => void fleet.reload()} />
       )}
+      {route.view === 'data-flows' && <DataFlowWalkthrough />}
       {route.view !== 'hangar' && (
         <div className="av-copilot-dock">
           <CopilotPanel session={session} caseId={route.view === 'case' ? route.caseId : null} />
