@@ -784,6 +784,13 @@ run "foundry_rejects_another_discovered_cosmos_database" {
 run "foundry_gateway_has_exact_operations_and_least_project_consumer" {
   command = plan
   override_resource {
+    target          = azurerm_role_definition.foundry_gateway_runtime[0]
+    override_during = plan
+    values = {
+      role_definition_resource_id = "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Authorization/roleDefinitions/12121212-1212-1212-1212-121212121212"
+    }
+  }
+  override_resource {
     target          = azurerm_user_assigned_identity.foundry_operator["publisher"]
     override_during = plan
     values          = { principal_id = "77777777-7777-7777-7777-777777777777" }
@@ -848,6 +855,26 @@ run "foundry_gateway_has_exact_operations_and_least_project_consumer" {
       ), azurerm_user_assigned_identity.app.principal_id)
     )
     error_message = "Only APIM receives the project-scoped Agent Consumer role; app direct invocation/admin rights must remain absent."
+  }
+  assert {
+    condition = (
+      toset(one(azurerm_role_definition.foundry_gateway_runtime[0].permissions).data_actions) == toset([
+        "Microsoft.CognitiveServices/accounts/AIServices/agents/read",
+        "Microsoft.CognitiveServices/accounts/AIServices/agents/write",
+        "Microsoft.CognitiveServices/accounts/AIServices/agents/delete"
+      ]) &&
+      length(coalesce(one(azurerm_role_definition.foundry_gateway_runtime[0].permissions).actions, [])) == 0 &&
+      length(coalesce(one(azurerm_role_definition.foundry_gateway_runtime[0].permissions).not_actions, [])) == 0 &&
+      length(coalesce(one(azurerm_role_definition.foundry_gateway_runtime[0].permissions).not_data_actions, [])) == 0 &&
+      toset(azurerm_role_definition.foundry_gateway_runtime[0].assignable_scopes) == toset([azurerm_resource_group.demo.id]) &&
+      azurerm_role_assignment.foundry_gateway_runtime[0].scope == local.foundry_project_id &&
+      azurerm_role_assignment.foundry_gateway_runtime[0].role_definition_id ==
+      "/subscriptions/00000000-0000-0000-0000-000000000000/providers/Microsoft.Authorization/roleDefinitions/12121212-1212-1212-1212-121212121212" &&
+      azurerm_role_assignment.foundry_gateway_runtime[0].principal_id == "aaaaaaaa-1111-2222-3333-444444444444" &&
+      azurerm_role_assignment.foundry_gateway_runtime[0].principal_type == "ServicePrincipal" &&
+      azurerm_role_assignment.foundry_gateway_runtime[0].principal_id != azurerm_user_assigned_identity.app.principal_id
+    )
+    error_message = "Only APIM may receive the exact project runtime actions, without management, publishing, wildcard or direct application authority."
   }
   assert {
     condition = (
@@ -927,6 +954,8 @@ run "foundry_disabled_preserves_existing_network" {
       length(azurerm_api_management_api_operation.foundry) == 0 &&
       length(azurerm_api_management_api_policy.foundry) == 0 &&
       length(azurerm_role_assignment.foundry_gateway) == 0 &&
+      length(azurerm_role_definition.foundry_gateway_runtime) == 0 &&
+      length(azurerm_role_assignment.foundry_gateway_runtime) == 0 &&
       output.foundry_gateway_endpoint == "" &&
       azurerm_subnet.app.address_prefixes == tolist(["10.20.1.0/24"]) &&
       azurerm_subnet.private_endpoints.address_prefixes == tolist(["10.20.2.0/24"])
