@@ -103,6 +103,32 @@ resource "azurerm_role_assignment" "foundry_gateway" {
   depends_on         = [azurerm_resource_group_template_deployment.foundry]
 }
 
+resource "azurerm_role_definition" "foundry_gateway_runtime" {
+  count       = local.foundry_state_count
+  name        = "${local.name_prefix}-${local.name_suffix}-foundry-gateway-runtime"
+  scope       = azurerm_resource_group.demo.id
+  description = "Project Conversations/Responses runtime for APIM; authoring routes remain denied by gateway policy."
+
+  permissions {
+    # Conversations/Responses use these coarse agent actions, not endpoint interaction.
+    data_actions = [
+      "Microsoft.CognitiveServices/accounts/AIServices/agents/read",
+      "Microsoft.CognitiveServices/accounts/AIServices/agents/write",
+      "Microsoft.CognitiveServices/accounts/AIServices/agents/delete"
+    ]
+  }
+  assignable_scopes = [azurerm_resource_group.demo.id]
+}
+
+resource "azurerm_role_assignment" "foundry_gateway_runtime" {
+  count              = local.foundry_state_count
+  scope              = local.foundry_project_id
+  role_definition_id = azurerm_role_definition.foundry_gateway_runtime[0].role_definition_resource_id
+  principal_id       = azurerm_api_management.gateway.identity[0].principal_id
+  principal_type     = "ServicePrincipal"
+  depends_on         = [azurerm_resource_group_template_deployment.foundry]
+}
+
 output "foundry_gateway_endpoint" {
   description = "Private APIM project endpoint; empty until the candidate is enabled."
   value       = var.foundry_enabled ? "${trimsuffix(local.model_endpoint, "/")}/foundry/projects/${local.foundry_project_name}" : ""
