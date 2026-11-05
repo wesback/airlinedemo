@@ -34,7 +34,7 @@ internal sealed class ManagedInvestigatorTurn
         _traceRecorder = traceRecorder;
         Input = ManagedHistoryContract.InvestigatorDocuments(manifest, _request, registry);
         _prompt = BoundedInvestigator.BuildPrompt(_request.Evidence);
-        var caseTools = new CaseReadTools(caseId, source, NoInvestigationLimits.Instance, AuthorizeDocument);
+        var caseTools = new CaseReadTools(caseId, source, NoInvestigationLimits.Instance);
         _sourceTools = new SourceReadTools(caseId, role, sources, NoInvestigationLimits.Instance);
         _functions = caseTools.Functions.Concat(_sourceTools.Functions).ToDictionary(function => function.Name, StringComparer.Ordinal);
         Functions = _functions.Values.ToArray();
@@ -127,6 +127,12 @@ internal sealed class ManagedInvestigatorTurn
     {
         if (output.Count != 1 || output["text"] is not JsonValue value || !value.TryGetValue<string>(out var text)) return false;
         if (name is SourceReadTools.ListTool or SourceReadTools.GetTool) return SourceOutput(name, arguments, text);
+        if (name == CaseReadTools.InventoryTool)
+        {
+            var inventory = _source.GetInventory(_caseId);
+            return text == (inventory.Count == 0 ? "no documents" :
+                $"{BoundedInvestigator.UntrustedBegin}\n{string.Join('\n', inventory)}\n{BoundedInvestigator.UntrustedEnd}");
+        }
         if (FixedCaseResult(name, text)) return true;
         if (!Unwrap(text, out var document)) return false;
         AuthorizeDocument(document);
