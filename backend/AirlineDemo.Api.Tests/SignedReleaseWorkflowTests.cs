@@ -7,33 +7,20 @@ public sealed class SignedReleaseWorkflowTests
 {
     private const string WorkflowPath = ".github/workflows/release.yml";
 
-    // AC: M-12. Approval gate: the deploy job runs in a protected environment whose required reviewers
-    // (product owner) must approve before any step executes.
     [Fact]
-    public void Release_job_runs_in_protected_environment_requiring_approval()
+    public void Demo_release_keeps_environment_without_manual_approval_preflight()
     {
         var workflow = ReadWorkflow();
 
         Assert.Matches(@"environment:\s*production-release", workflow);
         Assert.DoesNotContain("environment: ''", workflow);
 
-        // The environment must be shown to require reviewers: a preflight job fails the run otherwise,
-        // and the release job cannot start before preflight passes.
-        var preflight = JobBody(workflow, "preflight");
-        Assert.Contains("repos/$REPO/environments/production-release", preflight);
-        Assert.Contains("required_reviewers", preflight);
-        Assert.Contains("PRODUCT_OWNER_LOGIN: ${{ vars.PRODUCT_OWNER_LOGIN }}", preflight);
-        Assert.Contains("PRODUCT_OWNER_LOGIN variable is required", preflight);
-        Assert.Contains(".reviewer.login == $owner", preflight);
-        Assert.Contains("select(.type == \"User\"", preflight);
-        Assert.Contains("must require exactly one reviewer", preflight);
-        Assert.Contains("\"$owner_count\" -ne 1 || \"$total_count\" -ne 1", preflight);
-        Assert.Contains("product-owner approval is not enforced", preflight);
-        Assert.Contains("exit 1", preflight);
-        Assert.DoesNotContain("environment:", preflight);
-
         var release = JobBody(workflow, "release");
-        Assert.Contains("needs: preflight", release);
+        Assert.DoesNotContain("needs: preflight", release);
+        Assert.DoesNotContain("required_reviewers", workflow);
+        Assert.DoesNotContain("RELEASE_GOVERNANCE_TOKEN", workflow);
+        Assert.DoesNotContain("PRODUCT_OWNER_LOGIN", workflow);
+        Assert.DoesNotContain("  preflight:", workflow);
         Assert.Matches(@"environment:\s*production-release", release);
     }
 
@@ -165,14 +152,12 @@ public sealed class SignedReleaseWorkflowTests
     }
 
     [Fact]
-    public void Bootstrap_only_defaults_off_and_preserves_approval_and_signature_checks()
+    public void Bootstrap_only_defaults_off_and_preserves_environment_and_signature_checks()
     {
         var workflow = ReadWorkflow();
 
         Assert.Matches(@"bootstrap_only:\s+description: [^\n]+\s+required: false\s+default: false\s+type: boolean", workflow);
-        Assert.Contains("needs: preflight", JobBody(workflow, "release"));
         Assert.Matches(@"environment:\s*production-release", JobBody(workflow, "release"));
-        Assert.DoesNotContain("bootstrap_only", JobBody(workflow, "preflight"));
         Assert.DoesNotContain("bootstrap_only", StepBody(workflow, "Verify build run provenance"));
         Assert.DoesNotContain("bootstrap_only", StepBody(workflow, "Verify build evidence present"));
         Assert.DoesNotContain("bootstrap_only", StepBody(workflow, "Sign image digest"));
@@ -200,7 +185,6 @@ public sealed class SignedReleaseWorkflowTests
     {
         var workflow = ReadWorkflow();
 
-        Assert.Contains("needs: preflight\n    # Hosted runners cannot reach the private-only ACR endpoint", workflow);
         Assert.Contains("runs-on: [self-hosted, linux, x64, private-acr]", workflow);
         Assert.DoesNotContain("runs-on: ubuntu-latest\n    timeout-minutes: 30", workflow);
     }

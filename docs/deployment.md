@@ -34,8 +34,9 @@ Before starting:
   (`10.20.0.0/16` and `10.21.0.0/16`). Review the generated variable file before
   confirming plans. A budget alert is not a spending cap.
 - Be a repository administrator, or have an administrator complete the GitHub
-  prerequisites below. Azure and GitHub interactive sign-in, plan confirmation,
-  and personal release approval cannot be replaced by tenant/subscription IDs.
+  prerequisites below. Azure and GitHub interactive sign-in and plan confirmation
+  cannot be replaced by tenant/subscription IDs. Demo releases run without manual
+  environment approval; CI, provenance, image signing and signature verification remain required.
 
 The deployment adds a private executor VM, disk, NAT gateway, public **egress**
 address, private endpoint and DNS in the protected backend resource group.
@@ -52,16 +53,12 @@ weakening or silently recreating it.
 
 | Setting | Required value |
 | --- | --- |
-| Repository variable `PRODUCT_OWNER_LOGIN` | The GitHub login of the person approving releases |
-| Environment `production-release` | Exactly that user as its sole required reviewer; retain approved branch restrictions |
-| Repository secret `RELEASE_GOVERNANCE_TOKEN` | A GitHub token authorized to read this repository's environment protection rules |
+| Environment `production-release` | No required reviewers; retain the `main` branch deployment restriction and existing environment secrets |
 | Repository OIDC customization | Immutable subjects matching `infra/terraform/release-identity.tf` |
 
-Use the GitHub repository's **Settings > Secrets and variables > Actions** for
-the governance secret, or `gh secret set RELEASE_GOVERNANCE_TOKEN`. Never place
-the token value in an issue, a command argument, Terraform inputs or Git.
-The release workflow verifies the token's actual permissions; the deployment
-preflight can check only that the secret exists. It is not an Azure credential.
+The demo owner's release decision removes the earlier per-release human approval
+requirement. `PRODUCT_OWNER_LOGIN` and `RELEASE_GOVERNANCE_TOKEN` are no longer
+deployment prerequisites. Existing secret values are not changed by deployment.
 
 The runner registration token is a **different** credential: a repository-scoped
 fine-grained PAT with Administration read/write for this repository. Store it
@@ -119,10 +116,10 @@ The default `all` stage performs the following sequence:
    missing provenance and a missing exact registry digest stop deployment.
 8. Dispatch the protected release for that build ID and digest. On first
    deployment it signs/verifies with `bootstrap_only=true`; after the app exists,
-   releases also update the running app. The script prints the run URL and
-   stops while your personal approval/completion is pending.
-9. After you approve the release in GitHub and it succeeds, rerun the same
-   command. The recorded release is reused rather than dispatched again. Confirm
+   releases also update the running app. The script waits for automatic release
+   completion and fails if signing or verification fails.
+9. After release succeeds, continue with the same command. A resumed command
+   reuses the recorded release rather than dispatching again. Confirm
    the application plan to create the app from the signed immutable digest.
 10. Verify the running digest, API/client, unauthenticated denials, all five
     synthetic roles, three case-pack aircraft, Copilot projections, anti-forgery
@@ -130,8 +127,8 @@ The default `all` stage performs the following sequence:
     compare per-role case-state digests. Only then promote the fresh deployment
     inputs to the saved operator settings and write `verified.json`.
 
-The script exits nonzero while sign-in, release approval or another prerequisite
-is pending. That is a deliberate pause, not permission to skip the gate.
+The script exits nonzero while sign-in or another prerequisite is pending, or
+when a build, signing or verification step fails.
 An existing app blocks a platform-only configuration with no image: the normal
 deployment command never silently destroys a working app.
 
@@ -438,7 +435,7 @@ scripts/deploy.sh --tenant-id <tenant-id> --subscription-id <subscription-id> \
 
 | Stage | Purpose |
 | --- | --- |
-| `preflight` | Read-only GitHub protection, secret-name and OIDC checks |
+| `preflight` | Read-only GitHub environment existence and immutable OIDC checks |
 | `plan-bootstrap` | Initialize/adopt independent ownership and save the executor plan; no apply |
 | `bootstrap` | Provision executor/backend after plan confirmation |
 | `login` | Start/check executor device-code authentication |
@@ -450,7 +447,7 @@ scripts/deploy.sh --tenant-id <tenant-id> --subscription-id <subscription-id> \
 | `database` | Idempotent schema initialization, migrations and permission checks |
 | `configure` | GitHub variables, missing Key Vault values, private runner readiness |
 | `build` | Wait for or rerun push-main CI, retain and validate its exact digest |
-| `release` | Dispatch/resume personally approved signing/release |
+| `release` | Dispatch/resume automatic signing and verified release |
 | `application` | Require successful release, then plan/apply the application |
 | `verify` | Live HTTP/model, signed-digest and restart-durability checks |
 | `connect` | Temporary private bridge to the previous application's network |
@@ -549,8 +546,8 @@ identities.
 | SQL initialization fails | Run `--stage database` after correcting the reported private connectivity/grant/migration error. Never grant the app DDL, `db_owner` or audit mutation rights. |
 | Private runner remains offline | Inspect its cloud-init/registration log, PAT expiry/Administration permission, vault RBAC/private DNS and organizational shutdown. Keep unrelated runners unchanged. |
 | Build is absent or failed | Merge reviewed code to `main` and fix CI. Do not substitute a workflow-dispatch build or a local image for push-main provenance. |
-| Release is waiting | Personally approve its GitHub environment deployment, wait for success, then resume. |
-| Governance preflight fails | Correct the repository token/protection with its owner; never remove the required reviewer. |
+| Release is waiting | Check private-runner readiness and run status. The demo environment has no required reviewers; signing and verification must succeed. |
+| Repository preflight fails | Confirm the release environment exists and repository OIDC subjects match the Terraform workflow credentials. |
 | App health is 200 but browser fallback hides an API error | Use `/api/health`; `/health` is the SPA document, not a health endpoint. |
 | Verification/model check fails | Keep the prior saved inputs, inspect private app/gateway logs, fix the actual dependency, and rerun verification. No success marker is written on failure. |
 

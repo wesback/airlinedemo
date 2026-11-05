@@ -179,6 +179,9 @@ resource "azurerm_linux_virtual_machine" "build_runner" {
   boot_diagnostics {}
 
   lifecycle {
+    # Azure Update Manager owns the tenant's recurring patch schedule.
+    ignore_changes = [bypass_platform_safety_checks_on_user_schedule_enabled]
+
     precondition {
       condition     = var.build_runner_github_repository != null && var.build_runner_admin_ssh_public_key != null
       error_message = "enable_build_runner needs build_runner_github_repository and build_runner_admin_ssh_public_key."
