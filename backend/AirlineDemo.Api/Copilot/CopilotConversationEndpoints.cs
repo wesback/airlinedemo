@@ -97,7 +97,7 @@ public static class CopilotConversationEndpoints
                     throw new ManagedProjectException("conversation_history_invalid");
             }
 
-            var summaries = ManagedHistoryContract.CopilotSummaries(items.ToJsonString(), verified.Tuple.CaseId);
+            var summaries = ManagedHistoryContract.CopilotSummaries(items.ToJsonString(), verified.Tuple.CaseId, target);
             if (verified.AdmittedTurnCount is < 1 or > 20 || summaries.Count != verified.AdmittedTurnCount)
                 throw new ManagedProjectException("conversation_history_invalid");
             _ = VerifyBinding(binding, http, sessions, store, projections, cases, target, time);

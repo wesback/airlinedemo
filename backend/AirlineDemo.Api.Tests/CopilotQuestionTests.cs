@@ -179,6 +179,7 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
         public ConcurrentQueue<ManagedAgentTarget> AgentTargets { get; } = new();
         public Func<CancellationToken, Task>? BeforeListAsync { get; set; }
         public Func<CancellationToken, Task>? AfterListAsync { get; set; }
+        public Action<JsonObject>? HistoryItem { get; set; }
 
         public ManagedAgentTarget Agent(string workload)
         {
@@ -210,6 +211,7 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
             var items = _conversations[conversationId];
             var start = after is null ? 0 : items.FindIndex(item => (string?)item["id"] == after) + 1;
             var page = items.Skip(start).Take(100).Select(item => item.DeepClone()).ToArray();
+            foreach (var item in page) HistoryItem?.Invoke(item!.AsObject());
             var result = new JsonObject
             {
                 ["data"] = new JsonArray(page),
@@ -1239,9 +1241,22 @@ public sealed class CopilotQuestionTests : IAsyncDisposable
         Assert.Equal(2, await Proposals());
     }
 
-    [Fact]
-    public async Task ProductionHost_ManagedConversation_ContinuesAndReturnsSanitizedHistory()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProductionHost_ManagedConversation_ContinuesAndReturnsSanitizedHistory(bool nativeMetadata)
     {
+        if (nativeMetadata)
+            ((ScriptedManagedProjectClient)_factory.Services.GetRequiredService<IManagedProjectClient>()).HistoryItem = item =>
+            {
+                item["partition_key"] = "partition-1";
+                if ((string?)item["role"] == "assistant")
+                    item["created_by"] = new JsonObject
+                    {
+                        ["response_id"] = "response-1",
+                        ["agent"] = new JsonObject { ["type"] = "agent_id", ["name"] = "copilot-agent", ["version"] = "1" }
+                    };
+            };
         var session = Session("technical-reviewer");
         _chat.Reset(_ => Final("First answer."));
 

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using AirlineDemo.Api.Copilot;
 using AirlineDemo.Api.Evidence;
 using AirlineDemo.Api.Investigation;
@@ -19,6 +20,7 @@ public sealed record ManagedHistoryPolicy(
     internal string? Workload { get; init; }
     internal Func<ManagedConversationTuple, bool>? Context { get; init; }
     internal bool AllowToolRejections { get; init; }
+    internal ManagedAgentTarget? Agent { get; init; }
 }
 
 public sealed class ValidatedManagedHistory
@@ -109,11 +111,13 @@ public static class ManagedHistoryContract
             {
                 var item = node as JsonObject ?? throw Invalid();
                 if (!ids.Add(Text(item, "id"))) throw Invalid();
+                ValidateNativeMetadata(item, policy.Agent);
                 switch (Text(item, "type"))
                 {
                     case "message":
                     case "output_message":
-                        Shape(item, "id", "type", "status", "role", "content", "phase");
+                        Shape(item, "id", "type", "status", "role", "content", "phase",
+                            "agent_reference", "response_id", "created_by", "partition_key");
                         if (Text(item, "status") != "completed") throw Invalid();
                         var role = Text(item, "role");
                         if (role is not ("user" or "assistant") || Text(item, "type") == "output_message" && role != "assistant") throw Invalid();
@@ -134,7 +138,8 @@ public static class ManagedHistoryContract
                         if (!(role == "user" ? policy.UserText(text.ToString()) : policy.AssistantText(text.ToString()))) throw Invalid();
                         break;
                     case "function_call":
-                        Shape(item, "id", "type", "call_id", "name", "arguments", "status", "caller", "async");
+                        Shape(item, "id", "type", "call_id", "name", "arguments", "status", "caller", "async",
+                            "agent_reference", "response_id", "created_by", "partition_key");
                         FunctionModifiers(item);
                         var callId = Text(item, "call_id");
                         var name = Text(item, "name");
@@ -144,7 +149,8 @@ public static class ManagedHistoryContract
                         if (!policy.Arguments(name, arguments) || !calls.TryAdd(callId, (name, arguments))) throw Invalid();
                         break;
                     case "function_call_output":
-                        Shape(item, "id", "type", "call_id", "name", "output", "status", "caller");
+                        Shape(item, "id", "type", "call_id", "name", "output", "status", "caller",
+                            "agent_reference", "response_id", "created_by", "partition_key");
                         FunctionModifiers(item);
                         var resultId = Text(item, "call_id");
                         if (!calls.TryGetValue(resultId, out var call) || !completed.Add(resultId) ||
@@ -152,7 +158,8 @@ public static class ManagedHistoryContract
                             !policy.ToolOutput(call.Name, call.Arguments, ParseObject(Text(item, "output")))) throw Invalid();
                         break;
                     case "reasoning":
-                        Shape(item, "id", "type", "summary", "content", "encrypted_content", "status");
+                        Shape(item, "id", "type", "summary", "content", "encrypted_content", "status",
+                            "agent_reference", "response_id", "created_by", "partition_key");
                         if (item["encrypted_content"] is not null) throw Invalid();
                         if (item.ContainsKey("status") && Text(item, "status") != "completed") throw Invalid();
                         Reasoning(item["summary"], "summary_text");
@@ -181,9 +188,41 @@ public static class ManagedHistoryContract
         return UserInput(question);
     }
 
-    public static IReadOnlyList<ManagedCopilotTurnSummary> CopilotSummaries(string json, string selectedCaseId)
+    internal static void ValidateNativeMetadata(JsonObject item, ManagedAgentTarget? target, string? responseId = null)
     {
-        var history = Validate(json, CopilotPolicy(selectedCaseId)).CopyItems();
+        string Identifier(JsonObject owner, string property)
+        {
+            var value = Text(owner, property);
+            if (!Regex.IsMatch(value, "^[A-Za-z0-9_-]{1,128}\\z", RegexOptions.CultureInvariant)) throw Invalid();
+            return value;
+        }
+        void Agent(JsonNode? node, string type)
+        {
+            var agent = node as JsonObject ?? throw Invalid();
+            Shape(agent, "type", "name", "version");
+            if (target is null || Text(agent, "type") != type || Text(agent, "name") != target.Name ||
+                Text(agent, "version") != target.Version) throw Invalid();
+        }
+        string? origin = null;
+        if (item.ContainsKey("agent_reference")) Agent(item["agent_reference"], "agent_reference");
+        if (item.ContainsKey("response_id")) origin = Identifier(item, "response_id");
+        if (item.ContainsKey("created_by"))
+        {
+            var created = item["created_by"] as JsonObject ?? throw Invalid();
+            Shape(created, "response_id", "agent");
+            Agent(created["agent"], "agent_id");
+            var createdResponse = Identifier(created, "response_id");
+            if (origin is not null && origin != createdResponse) throw Invalid();
+            origin = createdResponse;
+        }
+        if (origin is not null && responseId is not null && origin != responseId) throw Invalid();
+        if (item.ContainsKey("partition_key")) _ = Identifier(item, "partition_key");
+    }
+
+    public static IReadOnlyList<ManagedCopilotTurnSummary> CopilotSummaries(string json, string selectedCaseId,
+        ManagedAgentTarget? target = null)
+    {
+        var history = Validate(json, CopilotPolicy(selectedCaseId) with { Agent = target }).CopyItems();
         var calls = history.OfType<JsonObject>().Where(item => Text(item, "type") == "function_call")
             .Select(item => Text(item, "call_id")).ToHashSet(StringComparer.Ordinal);
         var outputs = history.OfType<JsonObject>().Where(item => Text(item, "type") == "function_call_output")

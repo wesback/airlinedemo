@@ -31,7 +31,87 @@ public sealed class ManagedAgentRuntimeTests
     private static GatewayCorrelation Correlation() => new("copilot", "run-1", "managed", "cp-case-a", Digest, "v1", "call-1");
 
     [Theory]
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    [InlineData(false, "name")]
+    [InlineData(false, "version")]
+    [InlineData(false, "type")]
+    [InlineData(false, "response")]
+    [InlineData(false, "extra")]
+    [InlineData(true, "name")]
+    [InlineData(true, "version")]
+    [InlineData(true, "type")]
+    [InlineData(true, "extra")]
+    [InlineData(true, "partition")]
+    public async Task ProductionHost_NativeItemMetadata_BindsExactAgentAndResponse(bool history, string? fault)
+    {
+        await using var harness = new Harness();
+        await harness.InitializeAsync();
+        var binding = await harness.CreateAsync();
+        JsonObject Native(JsonObject item, bool stored)
+        {
+            var agent = new JsonObject
+            {
+                ["type"] = stored ? "agent_id" : "agent_reference",
+                ["name"] = "airline-copilot",
+                ["version"] = "1"
+            };
+            if (fault is "name" or "version" or "type") agent[fault] = "different";
+            if (fault == "extra") agent["instructions"] = "UNTRUSTED";
+            if (stored)
+            {
+                item["created_by"] = new JsonObject { ["response_id"] = "resp-1", ["agent"] = agent };
+                item["partition_key"] = fault == "partition" ? "invalid/key" : "partition-1";
+            }
+            else
+            {
+                item["agent_reference"] = agent;
+                item["response_id"] = fault == "response" ? "resp-other" : "resp-2";
+            }
+            return item;
+        }
+        harness.Edge.Respond = request =>
+        {
+            if (request.Method == HttpMethod.Get)
+            {
+                var items = new JsonArray();
+                if (history)
+                {
+                    items.Add(new JsonObject
+                    {
+                        ["id"] = "question-1",
+                        ["type"] = "message",
+                        ["status"] = "completed",
+                        ["role"] = "user",
+                        ["partition_key"] = "partition-1",
+                        ["content"] = new JsonArray(new JsonObject { ["type"] = "input_text", ["text"] = "What should I review?" })
+                    });
+                    items.Add(Native(Message("previous-answer", Answer), true));
+                }
+                return new JsonObject { ["data"] = items, ["has_more"] = false };
+            }
+            var message = Message("answer-1", Answer);
+            return Response(new JsonArray(history ? message : Native(message, false)));
+        };
+        var operation = harness.RunAsync(binding, (_, _) => throw new InvalidOperationException("No tool is requested"));
+        if (fault is null)
+        {
+            Assert.Equal(Answer, (await operation).Text);
+            Assert.False(harness.Store.ReadManagedConversation(binding.Handle)!.Retired);
+            Assert.Equal(1, harness.Edge.Submissions);
+        }
+        else
+        {
+            Assert.Equal("conversation_history_invalid", (await Assert.ThrowsAsync<ManagedProjectException>(() => operation)).Code);
+            Assert.True(harness.Store.ReadManagedConversation(binding.Handle)!.Retired);
+            Assert.Equal(history ? 0 : 1, harness.Edge.Submissions);
+        }
+        Assert.Equal(1, harness.Edge.Reads);
+    }
+
+    [Theory]
     [InlineData(null, null)]
+    [InlineData("native", null)]
     [InlineData("history", "conversation_history_invalid")]
     [InlineData("incomplete-history", "conversation_history_invalid")]
     [InlineData("unknown-call", "conversation_history_invalid")]
@@ -66,6 +146,12 @@ public sealed class ManagedAgentRuntimeTests
                 var output = new JsonArray(Call("fc-1", "call-1", fault == "unknown-call" ? "unregistered" : "list_my_cases"));
                 if (fault == "duplicate-call") output.Add(Call("fc-2", "call-1", "list_my_cases"));
                 var response = Response(output);
+                if (fault == "native")
+                    foreach (var item in output.OfType<JsonObject>())
+                    {
+                        item["agent_reference"] = response["agent_reference"]!.DeepClone();
+                        item["response_id"] = "resp-2";
+                    }
                 if (fault == "context-after-response") harness.Current = Tuple() with { CaseRevision = 1 };
                 if (fault == "refusal") output.Add(new JsonObject
                 {
