@@ -559,55 +559,8 @@ public sealed class ManagedAgentSetup(
     {
         ["format"] = new JsonObject
         {
-            ["type"] = "json_schema",
-            ["name"] = "investigation_claims",
-            ["strict"] = true,
-            ["schema"] = new JsonObject
-            {
-                ["type"] = "array",
-                ["items"] = new JsonObject
-                {
-                    ["type"] = "object",
-                    ["properties"] = new JsonObject
-                    {
-                        ["text"] = new JsonObject { ["type"] = "string" },
-                        ["witnesses"] = new JsonObject
-                        {
-                            ["type"] = "array",
-                            ["items"] = new JsonObject
-                            {
-                                ["type"] = "object",
-                                ["properties"] = new JsonObject
-                                {
-                                    ["documentId"] = new JsonObject { ["type"] = "string" },
-                                    ["page"] = new JsonObject { ["type"] = "integer" },
-                                    ["quote"] = new JsonObject { ["type"] = "string" },
-                                },
-                                ["required"] = new JsonArray("documentId", "page", "quote"),
-                                ["additionalProperties"] = false,
-                            },
-                        },
-                        ["sourceWitnesses"] = new JsonObject
-                        {
-                            ["type"] = "array",
-                            ["items"] = new JsonObject
-                            {
-                                ["type"] = "object",
-                                ["properties"] = new JsonObject
-                                {
-                                    ["sourceId"] = new JsonObject { ["type"] = "string" },
-                                    ["recordId"] = new JsonObject { ["type"] = "string" },
-                                    ["recordVersion"] = new JsonObject { ["type"] = "integer" },
-                                },
-                                ["required"] = new JsonArray("sourceId", "recordId", "recordVersion"),
-                                ["additionalProperties"] = false,
-                            },
-                        },
-                    },
-                    ["required"] = new JsonArray("text", "witnesses", "sourceWitnesses"),
-                    ["additionalProperties"] = false,
-                },
-            },
+            // Structured output requires an object root; the existing claim contract is an array.
+            ["type"] = "text",
         },
     };
 
