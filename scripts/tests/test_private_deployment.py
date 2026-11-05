@@ -1599,15 +1599,46 @@ chmod "$mode" "$destination"
             az.assert_not_called()
 
     @patch.object(deployment, "run")
-    def test_preflight_refuses_additional_release_reviewers(self, run):
-        reviewer = {"type": "User", "reviewer": {"login": "test-owner"}}
+    def test_preflight_accepts_demo_environment_without_reviewers_or_governance_token(self, run):
         run.side_effect = [
-            json.dumps({"protection_rules": [{"type": "required_reviewers", "reviewers": [reviewer, reviewer]}]}),
-            "test-owner\n",
+            json.dumps({"protection_rules": [{"type": "branch_policy"}]}),
+            json.dumps({"use_immutable_subject": True, "sub_claim_prefix": "repo:wesback@14137481/airlinedemo@1364258050"}),
         ]
-        with self.assertRaisesRegex(RuntimeError, "must require exactly"):
+        self.executor().preflight()
+        self.assertEqual(2, run.call_count)
+        self.assertEqual(("gh", "api", "repos/wesback/airlinedemo/environments/production-release"), run.call_args_list[0].args)
+
+    @patch.object(deployment, "run")
+    def test_preflight_still_rejects_mismatched_oidc_without_reviewers(self, run):
+        run.side_effect = [
+            json.dumps({"protection_rules": [{"type": "branch_policy"}]}),
+            json.dumps({"use_immutable_subject": False}),
+        ]
+        with self.assertRaisesRegex(RuntimeError, "Repository OIDC subjects do not match"):
             self.executor().preflight()
         self.assertEqual(2, run.call_count)
+
+    @patch.object(deployment, "run")
+    def test_release_waits_for_automatic_signed_release_and_reuses_record(self, run):
+        instance = self.executor()
+        with tempfile.TemporaryDirectory() as directory:
+            instance.directory = Path(directory)
+            build = {"id": 41, "digest": "sha256:" + "a" * 64, "main_sha": "b" * 40}
+            (instance.directory / "build.json").write_text(json.dumps(build))
+            (instance.directory / "release.json").write_text(json.dumps({"id": 42, "build": build}))
+            evidence = instance.directory / "release-evidence" / "42"
+            evidence.mkdir(parents=True)
+            (evidence / "notation-inspect.txt").write_text(build["digest"])
+            run.side_effect = [
+                json.dumps({"status": "in_progress", "conclusion": "", "url": "release-run"}),
+                None,
+                json.dumps({"status": "completed", "conclusion": "success", "url": "release-run"}),
+                None,
+            ]
+            instance.release()
+            self.assertEqual(("gh", "run", "watch", "42", "--repo", "wesback/airlinedemo", "--exit-status"),
+                             run.call_args_list[1].args)
+            self.assertFalse(any(call.args[:3] == ("gh", "workflow", "run") for call in run.call_args_list))
 
     def test_login_reports_not_ready_until_authenticated(self):
         instance = self.executor()

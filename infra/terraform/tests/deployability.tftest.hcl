@@ -295,6 +295,11 @@ run "build_runner_is_private_and_reads_only_its_token" {
   }
 
   assert {
+    condition     = azurerm_linux_virtual_machine.build_runner[0].patch_mode == "AutomaticByPlatform" && azurerm_linux_virtual_machine.build_runner[0].patch_assessment_mode == "AutomaticByPlatform" && can(regex("(?s)resource \"azurerm_linux_virtual_machine\" \"build_runner\".*ignore_changes\\s*=\\s*\\[bypass_platform_safety_checks_on_user_schedule_enabled\\]", file("build-runner.tf")))
+    error_message = "Automatic platform patching and assessment remain enforced while Azure owns only its recurring patch-schedule flag."
+  }
+
+  assert {
     condition     = azurerm_key_vault_secret.build_runner_token[0].name == "github-runner-token" && azurerm_key_vault_secret.build_runner_token[0].value == null && azurerm_key_vault_secret.build_runner_token[0].value_wo_version == 1 && can(regex("(?s)resource \"azurerm_key_vault_secret\" \"build_runner_token\".*value_wo\\s*=\\s*\"unset\".*ignore_changes\\s*=\\s*\\[value, value_wo_version\\]", file("build-runner.tf")))
     error_message = "Terraform creates the token secret as unset and never overwrites the token the deployer stores."
   }
