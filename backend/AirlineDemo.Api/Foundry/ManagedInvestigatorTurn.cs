@@ -152,7 +152,7 @@ internal sealed class ManagedInvestigatorTurn
     private void AuthorizeDocument(string text)
     {
         BoundedInvestigator.ValidateDocuments([text]);
-        _ = ModelCallGate.Authorize(_manifest, _request with { Evidence = [text] }, _registry);
+        _ = ModelCallGate.Authorize(_manifest, _request with { Evidence = [text.TrimEnd('\r', '\n')] }, _registry);
     }
 
     private bool SourceOutput(string name, JsonObject arguments, string text)

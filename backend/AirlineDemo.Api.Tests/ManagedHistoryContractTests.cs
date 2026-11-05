@@ -217,6 +217,35 @@ public sealed class ManagedHistoryContractTests
     }
 
     [Theory]
+    [InlineData("", null)]
+    [InlineData("\n", null)]
+    [InlineData("\r\n", null)]
+    [InlineData("\r\n\r\n", null)]
+    [InlineData(" ", "model request refused: evidence SHA-256 is not registered as synthetic content")]
+    [InlineData("\nUNREGISTERED", "model request refused: content has characters outside the synthetic evidence allowlist")]
+    public async Task ManagedInvestigatorPage_NormalizesOnlyTrailingLineEndings(string suffix, string? error)
+    {
+        const string evidence = "SYNTHETIC EVIDENCE: aircraft evidence v1.";
+        var source = new ManagedClaimSource(evidence + suffix, "case-001");
+        var turn = new ManagedInvestigatorTurn("case-001", "presenter", source,
+            new(new TechnicalSource(), new MaintenanceSource(), new FinanceSource(), new RecordsSource(), new ContractsSource()),
+            FakeApprovedManifest.Approved(), new ModelRequest("evidence-v1", "swedencentral", evidence),
+            SyntheticContentRegistry.FromCommittedFixtures());
+        var args = new JsonObject { ["documentId"] = "document-1", ["page"] = 1 };
+        async Task<JsonObject> Read() => await turn.DispatchAsync(new("page-1", CaseReadTools.SourcePageTool, args),
+            TestContext.Current.CancellationToken);
+        if (error is not null)
+            Assert.Equal(error, (await Assert.ThrowsAsync<ModelGateException>(Read)).Message);
+        else
+        {
+            var output = await Read();
+            Assert.Equal($"{BoundedInvestigator.UntrustedBegin}\n{evidence}{suffix}\n{BoundedInvestigator.UntrustedEnd}", (string?)output["text"]);
+            Assert.True(turn.Policy.ToolOutput(CaseReadTools.SourcePageTool, args, output));
+        }
+        Assert.Equal(1, source.PageReads);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void ManagedInvestigatorHistory_RestoresOnlyExactCommittedSourceWitnesses(bool tamperRecord)
