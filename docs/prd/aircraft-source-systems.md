@@ -280,7 +280,7 @@ For the original summary-only dashboard, usability and accessibility remain outs
 |---|---|---|---|---|
 | CON-001 | Handle synthetic data only (ARR:CON-001). | Operational | ARR imposes the synthetic-data boundary. | No real data. An exception requires an owner-approved ARR PRD change. |
 | CON-002 | Add no ARR lifecycle state or role for arrival, and no new agent or orchestrator. | Architectural | DD-014 and the confirmed arrival scope retain the existing workflow and roles; ARR:DD-010 forbids a second orchestrator and long-lived agents. | A change to this scope requires a user-approved PRD amendment; any conflict with ARR also requires an ARR amendment. |
-| CON-003 | Arrival stories do not edit `.ai-sdlc/`, `AGENTS.md`, or other root CI files. They do not edit `.github/` except that a needed `.github/workflows/` change has its own person-merged story. | Delivery | `AGENTS.md` limits implementer write scope for these files, and AI-SDLC does not merge changes under `.github/`. | Keep protected-file work outside arrival stories; isolate any required workflow change for the person-merge gate. |
+| CON-003 | Keep application changes separate from CI configuration changes. A needed `.github/workflows/` change has its own person-merged pull request. | Delivery | Separate review of application and CI changes. | Isolate any required workflow change for human review and merge. |
 | CON-004 | Run the five source stubs in-process (DD-001). | Architectural | The requested scenario excludes separately deployed source systems. | A stub-deployment change requires a user-approved change to this PRD. |
 
 ## Process Models
@@ -387,7 +387,7 @@ Coverage: 33 of 33 FRs have at least one criterion (100%).
 
 The original release contains FR-001 through FR-016, except the withdrawn FR-013, together with the existing obligations separated as FR-033 and FR-034. **Do not merge this PRD while its ARR prerequisites are undelivered.** Before approval, the product owner verifies default-branch code and passing behavior tests for ARR:FR-001, ARR:FR-002, ARR:FR-005, ARR:FR-006, ARR:FR-007, ARR:FR-008, ARR:FR-010 and ARR:DD-014, and CP:FR-001, CP:FR-002 and CP:FR-009. If CP is not yet delivered, stories for the Cases A to C fixtures wait for it and the ARR core case fixtures can proceed alone.
 
-The arrival addendum adds FR-017 through FR-032 to the opted-in release; its human merge and subsequent pipeline planning gate precede production work.
+The arrival addendum adds FR-017 through FR-032 to the opted-in release; its human merge and subsequent implementation planning precede production work.
 
 Suggested story order (each story changes under 500 lines, names its test file, and leaves the tests failing on `main`):
 
@@ -626,7 +626,7 @@ Progress: arrival criteria AC-040 through AC-068 are not started; this addendum 
 
 No separate source systems, real data, new infrastructure, package dependencies, agents or changes to fixture record schemas are in scope. The independent CI repair reconciles manifest counts and removes the signature requirement under DD-034; it does not change role, case or read-limit controls. The fixture rehearsal has no external runtime dependency, and the co-located hash does not prove fixture authorship. In-process stubs follow DD-001, synthetic-only data follow ARR:CON-001, and the no-new-role or lifecycle-state boundary follows DD-014. A fixture-only rehearsal stops before package submission; an actual model-backed investigation is a separate optional continuation.
 
-The human merge is the PRD approval gate: **@wesback is the named reviewer, approver and merger; the PRD correction was merged in #707. @wesback approved implementation as owner on 2026-11-02.** The repository pipeline performs quality, security and functional planning and creates implementation stories; production stories remain gated on its output.
+The human merge is the PRD approval gate: **@wesback is the named reviewer, approver and merger; the PRD correction was merged in #707. @wesback approved implementation as owner on 2026-11-02.** Quality, security and functional planning precede production work.
 
 ## Sign-Off
 
@@ -646,7 +646,7 @@ None requested.
 
 ### Handoff Readiness
 
-The arrival scope is Product Owner and Engineering Reviewer approved by @wesback on 2026-11-02. The owner subsequently approved removing source-fixture signing in all environments; DD-034 records that decision and its authenticity limitation. No arrival production story begins until this PRD update is human-merged and post-merge security and functional planning creates the implementation stories. The independent CI repair must pass before fixture rehearsal; no signing key is needed. The telemetry approval record (DD-025) remains a separate person-merged pull request; the stories adding its four attributes depend on it.
+The arrival scope is Product Owner and Engineering Reviewer approved by @wesback on 2026-11-02. The owner subsequently approved removing source-fixture signing in all environments; DD-034 records that decision and its authenticity limitation. No arrival production story begins until this PRD update is human-merged and security and functional planning are complete. The independent CI repair must pass before fixture rehearsal; no signing key is needed. The telemetry approval record (DD-025) remains a separate person-merged pull request; the stories adding its four attributes depend on it.
 
 ## Disclaimer
 

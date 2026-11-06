@@ -90,7 +90,7 @@ Companion identifiers use `COP:` for copilot 0.2.0 and `SRC:` for source systems
 | [DemoSessionStore](../../backend/AirlineDemo.Api/Auth/DemoSessionStore.cs) | Current source; C22 | Memory-only sessions, eight-hour sliding expiry; restart invalidates sessions. |
 | [Private deploy script](../../scripts/deploy-private.py), [deployment manual](../deployment.md) | Current source | Derived configuration, private executor, protected signing/release, saved-plan confirmation and resume. |
 
-**Scoped precedence on human merge:** this PRD supersedes only incompatible COP:DD-004 infrastructure/provider restrictions, COP:DD-006 no-persisted-conversation/one-question runtime, COP:DD-007's exclusion of this new provider/content approval, and associated COP:CON-002/COP:CON-006/COP:NFR-014/cloud-egress or no-persistence statements. ARR's per-internal-inference APIM/call accounting is replaced only for managed internal inference. Raw source exclusion, source entitlements, structural validation, immutable release and audit remain binding. COP:DD-012/COP:DD-017 manual handoff applies to that earlier feature/addendum, not a global override: [AGENTS.md](../../AGENTS.md) governs this new feature's post-merge quality/security/functional planning. No companion file is edited by this authoring.
+**Scoped precedence on human merge:** this PRD supersedes only incompatible COP:DD-004 infrastructure/provider restrictions, COP:DD-006 no-persisted-conversation/one-question runtime, COP:DD-007's exclusion of this new provider/content approval, and associated COP:CON-002/COP:CON-006/COP:NFR-014/cloud-egress or no-persistence statements. ARR's per-internal-inference APIM/call accounting is replaced only for managed internal inference. Raw source exclusion, source entitlements, structural validation, immutable release and audit remain binding. COP:DD-012/COP:DD-017 delivery decisions apply to that earlier feature/addendum. This feature requires human approval and quality/security/functional planning before implementation. No companion file is edited by this authoring.
 
 ## Users and Personas
 
@@ -138,7 +138,7 @@ All rows are proposed product decisions for human review, except the already sel
 | DD-011 | One versioned 12-row synthetic Foundry dataset/run per exact release input identity; relevance and groundedness normalized to 1–5, each row at least 3. Safety/Prompt Shields evidence is separate; no unsupported regional evaluator. |
 | DD-012 | Existing record screening remains fail-visible `clear/detected/unavailable`; deployment filters block medium/high severity Hate, Sexual, Violence and SelfHarm for input and output using the verified service schema. Screening is not authorization or injection immunity. |
 | DD-013 | Metadata-only app and service trace exports; no prompt/output harvesting. Missing usage stays unknown, and missing evidence never produces passing assurance. |
-| DD-014 | Scoped companion supersession follows Product Context. Existing source/tool/approval controls remain; this new feature follows current repository post-merge planning policy. |
+| DD-014 | Scoped companion supersession follows Product Context. Existing source/tool/approval controls remain; planning follows human approval. |
 | DD-015 | Expiry immediately denies use; bounded cleanup removes service items according to verified deletion semantics. Retention and deletion lag remain visible, not an instant physical-erasure promise. |
 | DD-016 | No provisioning until exact plan, policy, quota and cost confirmation; no cutover until real private proofs and personal signed-release approval. No automatic costly SKU, regional, public-network or direct-model fallback. |
 
@@ -364,7 +364,7 @@ All constraints are non-negotiable within this scope; changing one requires a ne
 | CON-005 | Exact new-runtime store configuration, current prices/capacity/quota/policy and plan require fail-closed human confirmation before extra provisioning; no automatic costly fallback. Source: user, research W31 discrepancy. | Financial / provisioning; missing/changed cost evidence invalidates confirmation. | GOAL-001, GOAL-004 / AC-001, AC-005 |
 | CON-006 | No public MCP/cookie bridge/service-account elevation, hosted legacy loop, harness/memory/voice or model-side business writes. Source: selected user scope/F16–F20. | Technical / tools; only app executes authorized functions. | GOAL-002 / AC-006, AC-007 |
 | CON-007 | Preserve application components and protected backend/state/signing material; no full-app destruction as migration shortcut or key purge. Source: user and deployment manual. | Operational / retirement; exact deletion plan after successful cutover only. | GOAL-001, GOAL-004 / AC-026 |
-| CON-008 | No hidden mandatory `.github` changes in application requirements; necessary workflow changes are separate human-merged work after the gate. Source: AGENTS and user. | Organizational / pipeline; no skips, approval impersonation or weakening signing protections. | GOAL-004 / AC-025, AC-029 |
+| CON-008 | No hidden mandatory `.github` changes in application requirements; necessary workflow changes are separate human-merged work after approval. Source: user delivery direction. | Organizational; no approval impersonation or weakening signing protections. | GOAL-004 / AC-025, AC-029 |
 
 ## Process Models
 
@@ -543,7 +543,7 @@ Authored coverage: `(24 / 24) * 100 = 100.0%`; target 100.0%. Every NFR/CON name
 
 ## MVP and Release Framing
 
-First release includes FR-001–FR-024 and GOAL-001–GOAL-004 in full. Managed state, meaningful safety/evaluation/telemetry, five working roles, all three packs and complete deployment/manual are not deferred. Implementation follows human merge and the repository's post-merge quality, security and functional-planning gates; this PRD is not a work-item plan.
+First release includes FR-001–FR-024 and GOAL-001–GOAL-004 in full. Managed state, meaningful safety/evaluation/telemetry, five working roles, all three packs and complete deployment/manual are not deferred. Implementation follows human merge and quality, security and functional planning; this PRD is not a work-item plan.
 
 Out of scope: real airline/customer data, real aircraft/financial/legal clearance, OAuth/session persistence redesign, external/public MCP, arbitrary documents, managed memory/voice/harness, hosted legacy orchestration, cross-region evaluators, BYOM gateway chaining and automatic platform fallbacks. Four-arm research comparators remain explicit evaluation modes, not runtime fallback.
 
@@ -610,7 +610,7 @@ No unresolved product/architecture scope question is delegated to implementation
 - [ ] Product Sponsor — wesback: product opportunity and selected migration scope; no approval recorded.
 - [ ] Product Owner — wesback: requirements, limits and persistent-content/gateway contract; human PRD merge pending.
 - [ ] Technical Lead — repository engineering reviewer: private topology/runtime feasibility and live release evidence.
-- [ ] Quality Lead — repository quality reviewer: post-merge pipeline quality and later test/evidence coverage; no nested reviewer invoked here.
+- [ ] Quality Lead — repository quality reviewer: requirements quality and later test/evidence coverage; no nested reviewer invoked here.
 - [ ] Legal/Compliance — appropriate security/privacy reviewers: data handling and applicable policy; no legal or compliance certification claimed.
 
 Approval date: Not approved.
@@ -625,7 +625,7 @@ None.
 
 Complete integrated **Draft**, ready for human PR review, not approved for implementation before merge. Planning blockers: None; zero unresolved scope questions. Authored inventory: **4 GOAL, 24 FR, 15 NFR, 8 CON, 29 AC, 16 DD**. FR-to-AC and FR-to-GOAL authored coverage: **100.0%** each. Ten research finding dispositions cover F11–F20.
 
-Validate/Finalize: **not entered; not passed**. Quality report: not requested in this bounded authoring; post-merge pipeline owns formal review. All acceptance execution/live proof and all approver decisions remain pending. No backlog handoff, issue/story planning, repository tracking files or infrastructure mutations are produced. Artifact hash can be recorded by the human review/merge process; no Finalize handoff is emitted.
+Validate/Finalize: **not entered; not passed**. Quality report: not requested in this bounded authoring; formal review remains pending. All acceptance execution/live proof and all approver decisions remain pending. No backlog handoff, issue/story planning, repository tracking files or infrastructure mutations are produced. Artifact hash can be recorded by the human review/merge process; no Finalize handoff is emitted.
 
 ## Disclaimer
 

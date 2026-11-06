@@ -107,7 +107,7 @@ Retire the old standalone model resources only after a reviewed migration plan a
 
 Goal: establish a supported, private, reproducible Foundry target and meaningful safety, evaluation and observability capabilities for this flagship demo.
 
-Audience: product owner, PRD approval, implementation pipeline. In scope: Terraform/model/gateway/client contracts, Foundry projects, evaluation, safety, tracing, identity, network isolation and deployment automation. Out of scope: implementation before the repository PRD merge gate, production customer data, exposing private services, automatic protected-release approval.
+Audience: product owner, PRD approvers, implementation team. In scope: Terraform/model/gateway/client contracts, Foundry projects, evaluation, safety, tracing, identity, network isolation and deployment automation. Out of scope: implementation before the repository PRD merge gate, production customer data, exposing private services, automatic protected-release approval.
 
 Criteria: demonstrable user value, supported APIs, exact testable outcomes, regional/private compatibility, few deployment inputs and retained authorization/audit semantics.
 
@@ -158,7 +158,7 @@ User chose B. Cycle 2 below resolves the additional research; no new provisionin
 | Blockers | None for PRD authoring; approval/live gates remain |
 | Output mode and planning support | convergence; supports requirements after decision |
 | Continuation owner | User and repository PRD gate |
-| Required gates | Scope decision; PRD built with HVE prd-builder, human-approved PRD merge, downstream pipeline stories, Azure policy/validation and personal release approval |
+| Required gates | Scope decision; PRD built with HVE prd-builder, human-approved PRD merge, implementation planning, Azure policy/validation and personal release approval |
 | Next action | Hand evidence and selected scope to HVE prd-builder; no implementation before human PRD merge |
 | Primary evidence file | docs/research/2026-11-03/foundry-migration-research.md; docs root from repository instruction; date from user timestamp |
 
@@ -176,7 +176,7 @@ Resolved root: docs (trusted evidence root from repository research instruction)
 
 | Kind | Candidate | Selection and authority |
 | --- | --- | --- |
-| Instruction | Repository AI-SDLC PRD/research gate | Selected: docs evidence, human PRD gate before implementation |
+| Requirement | PRD research and approval | Docs evidence and human PRD approval before implementation |
 | Skill | microsoft-foundry | Selected: platform/network guidance; dependency check passed |
 | Skill | azure-aigateway | Selected: preserve private APIM governance |
 | Skill | belux-azure-policy-gate | Relevant but not executed for new topology in research; required before provisioning |
