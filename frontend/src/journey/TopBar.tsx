@@ -8,7 +8,9 @@ export type Mode = 'board' | 'hangar';
 type Props = {
   session: Session;
   mode: Mode;
+  dataFlowsActive: boolean;
   onMode: (mode: Mode) => void;
+  onDataFlows: () => void;
   onHome: () => void;
   onSwitchPersona: (userId: string) => void;
   onSignOut: () => void;
@@ -16,7 +18,7 @@ type Props = {
   onToggleTheme: () => void;
 };
 
-export default function TopBar({ session, mode, onMode, onHome, onSwitchPersona, onSignOut, theme, onToggleTheme }: Props) {
+export default function TopBar({ session, mode, dataFlowsActive, onMode, onDataFlows, onHome, onSwitchPersona, onSignOut, theme, onToggleTheme }: Props) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const persona = personaForRole(session.role);
@@ -39,13 +41,17 @@ export default function TopBar({ session, mode, onMode, onHome, onSwitchPersona,
       <span className="av-topbar-product">Asset transitions</span>
 
       <nav className="av-modes" aria-label="View">
-        <button type="button" className={mode === 'board' ? 'is-active' : ''} aria-pressed={mode === 'board'} onClick={() => onMode('board')}>
+        <button type="button" className={mode === 'board' && !dataFlowsActive ? 'is-active' : ''}
+          aria-pressed={mode === 'board' && !dataFlowsActive} onClick={() => onMode('board')}>
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 3h3v10H2zM6.5 3h3v6h-3zM11 3h3v8h-3z" /></svg>
           Journey board
         </button>
         <button type="button" className={mode === 'hangar' ? 'is-active' : ''} aria-pressed={mode === 'hangar'} onClick={() => onMode('hangar')}>
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 7.5L8 2.5l6.5 5V14h-3V9.5h-7V14h-3z" /></svg>
           3D hangar
+        </button>
+        <button type="button" className={dataFlowsActive ? 'is-active' : ''} aria-pressed={dataFlowsActive} onClick={onDataFlows}>
+          Data flows
         </button>
       </nav>
 
