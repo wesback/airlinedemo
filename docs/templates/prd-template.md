@@ -55,11 +55,11 @@ Planning blockers: {{planning_blockers_or_none}}
 *Guidance*: Set Research status to `Required` when material requirements depend on external facts, unfamiliar APIs or
 platform behavior, consequential assumptions, or competing product or architecture choices. Otherwise set it to
 `Not required` and give the evidence-based rationale. For `Required`, complete bounded HVE Core RPI Research before
-PRD approval. Run the Research phase only; the pipeline's Functional Planner and AI-SDLC steps own story planning and
-implementation. Set `docs` as the trusted evidence root so the dated primary artifact is committed at
+PRD approval. Run the Research phase only; implementation planning follows human approval.
+Set `docs` as the trusted evidence root so the dated primary artifact is committed at
 `docs/research/YYYY-MM-DD/<task-slug>-research.md` in the same PR as this PRD. Record each material finding below and
 resolve every question that could change scope, behavior, security, or story order before setting the field to
-`Planning blockers: None`. A PRD merged for automatic planning must have no planning blockers.
+`Planning blockers: None`. A PRD ready for implementation planning must have no planning blockers.
 
 ### Research Finding Dispositions
 

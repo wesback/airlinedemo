@@ -126,7 +126,7 @@ The confirmed direction is a same-origin stateless endpoint, API-owned role proj
 ## Scope and Questions
 
 * Goal: establish evidence-backed requirements for five thin, role-aware MCP tools over the existing case API.
-* Audience and use: the product owner, PRD builder, and post-approval pipeline planner.
+* Audience and use: the product owner, PRD builder, and implementation planner.
 * In scope: current API contracts, role visibility, shared read limits, hosted .NET MCP transport, trusted release confirmation, safe invocation audit, and a minimal governed model client with deterministic source-instruction safeguards.
 * Out of scope: implementation during research, live cloud changes, MCP APIM routing, OAuth OBO, new business gate rules, earlier-gate writes, and the full conversational chat panel.
 * Criteria: preserve API-owned authorization and gates; prevent cross-user session sharing, unconfirmed writes, unauthorized disclosure, and source-text instruction execution.
@@ -176,9 +176,9 @@ The confirmed direction is a same-origin stateless endpoint, API-owned role proj
 | Research depth and helpers | Two complete Wider/Deeper/Contrarian cycles; no helpers used |
 | Blockers | None |
 | Output mode and planning support | Analysis; supports PRD preparation once material questions are answered |
-| Continuation owner | Requirements-author parent; the pipeline owns post-merge story planning |
+| Continuation owner | Requirements-author parent; implementation planning follows human approval |
 | Required gates or confirmations | Named person's PRD merge explicitly approves the copilot input contract before implementation; provider-manifest approval remains unchanged; no cloud changes authorized |
-| Next action | Research closes; requirements-author parent prepares the PRD with the required PRD builder. No RPI Plan handoff: post-merge pipeline owns story planning |
+| Next action | Research closes; requirements-author parent prepares the PRD with the required PRD builder. Implementation planning follows human approval |
 | Primary evidence file | docs/research/2026-10-30/role-aware-copilot-mcp-research.md; date from the user's current_datetime |
 
 ## Research Record
@@ -202,11 +202,11 @@ The confirmed direction is a same-origin stateless endpoint, API-owned role proj
 
 | Kind | Candidate | Provenance and scoped contract | Selected or skipped reason |
 | --- | --- | --- | --- |
-| Instruction | Repository AI-SDLC PRD-first and research gate | Repository custom instructions | Selected: research and PRD approval precede large feature implementation. |
+| Requirement | PRD-first research and approval | Product delivery requirements | Research and PRD approval precede large feature implementation. |
 | Skill | requirements-author | Available skill and user feature scope | Selected parent: requirements and stable traceability. |
 | Skill | belux-azure-policy-gate | Available user skill; existing managed-tenant APIM goal | Selected for current authenticated policy evidence only; no resource change authorized. |
 | Skill | entra-app-registration | Available skill | Skipped: user explicitly deferred OAuth OBO. |
-| Skill | backlog-plan | Available skill | Skipped: post-merge pipeline owns story planning. |
+| Skill | backlog-plan | Available skill | Skipped: this research scope excludes implementation planning. |
 
 #### Direction and Participation Log
 
