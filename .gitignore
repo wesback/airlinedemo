@@ -2,10 +2,6 @@
 .DS_Store
 
 # Local tooling and delivery records
-/.ai-sdlc/
-/backlog/
-/AGENTS.md
-/.github/ISSUE_TEMPLATE/ai-sdlc-story.md
 /.github/copilot-instructions.md
 /.github/agents/
 /.github/instructions/
