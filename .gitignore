@@ -2,7 +2,6 @@
 .DS_Store
 
 # Local tooling and delivery records
-/.github/copilot-instructions.md
 /.github/agents/
 /.github/instructions/
 /.github/prompts/
